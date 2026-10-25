@@ -1,26 +1,88 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --navy: #0b1e3a;
+  --navy2: #14315e;
+  --royal: #1d4ed8;
+  --royal-deep: #1e3a8a;
+  --ice: #eff6ff;
+  --ice2: #dbeafe;
+  --blue: #2563eb;
+  --bg: #f5f7fc;
+  --surface: #ffffff;
+  --surface2: #eff6ff;
+  --ink: #1f2937;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --line: #e5e7eb;
+  --good: #0e7c55;
+  --good-bg: #e3f5ec;
+  --warn: #a8650e;
+  --warn-bg: #fcf1de;
+  --bad: #b9362f;
+  --bad-bg: #fbe6e4;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-navy: var(--navy);
+  --color-royal: var(--royal);
+  --color-royal-deep: var(--royal-deep);
+  --color-ice: var(--ice);
+  --color-ice2: var(--ice2);
+  --color-blue: var(--blue);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-good: var(--good);
+  --color-good-bg: var(--good-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --font-sans: var(--font-poppins), ui-sans-serif, "Segoe UI", Arial, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.brand-gradient {
+  background: linear-gradient(150deg, #0b1e3a 0%, #14315e 45%, #1d4ed8 130%);
+}
+.brand-grid {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 52px 52px;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card { @apply rounded-2xl border border-line bg-surface p-5; }
+  .eyebrow { @apply text-[10.5px] font-semibold uppercase tracking-[0.18em] text-blue; }
+  .h1 { @apply text-2xl font-bold tracking-tight text-ink; }
+  .h2 { @apply text-lg font-semibold text-ink; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full bg-blue px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-full bg-surface2 px-4 py-2 text-sm font-medium text-ink transition hover:bg-line disabled:opacity-50; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-full bg-bad px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-50; }
+  .btn-sm { @apply px-3 py-1 text-xs; }
+  .label { @apply mb-1 block text-xs font-medium text-muted; }
+  .input { @apply w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-blue focus:ring-2 focus:ring-blue/20; }
+  .badge { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold; }
+  .table { @apply w-full border-collapse text-sm; }
+  .table th { @apply bg-navy px-3 py-2.5 text-left text-[10.5px] font-medium uppercase tracking-wider text-white; }
+  .table td { @apply border-t border-[#EDF0F5] px-3 py-2.5 align-middle; }
+  .table tbody tr:nth-child(even) td { background: #f6f9ff; }
+  .chip { @apply inline-flex items-center rounded-full bg-ice2 px-2.5 py-0.5 text-xs font-medium tracking-[0.02em] text-royal; }
+  .kicker { @apply inline-flex items-center rounded-full border border-[#93C5FD]/45 px-3 py-1 text-[10.5px] font-medium uppercase tracking-[0.2em] text-[#BFDBFE]; }
+  .band { @apply relative overflow-hidden rounded-2xl px-6 py-5 text-white; background: linear-gradient(120deg, #0b1e3a, #1e40af); }
+  .band::after { content: ""; position: absolute; right: -70px; top: -70px; width: 210px; height: 210px; border-radius: 50%; background: radial-gradient(circle, rgba(147, 197, 253, 0.35), transparent 65%); pointer-events: none; }
+  .callout { @apply rounded-r-xl border-l-4 border-blue px-4 py-3; background: linear-gradient(120deg, #eff6ff, #dbeafe); }
+  .stat-hot { background: linear-gradient(160deg, #1d4ed8, #1e3a8a); }
 }

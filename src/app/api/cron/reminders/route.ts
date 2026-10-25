@@ -1,0 +1,63 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { db } from "@/lib/supabase";
+import { esc } from "@/lib/email";
+import { fmtDate, todayISO, trainerTitle } from "@/lib/format";
+import { getSetting } from "@/lib/scoring";
+import { BOOKING_SELECT, bookingRows, notify, trainerRecipient, userById, usersWithRoles, type BookingRow } from "@/lib/notify";
+
+// Runs daily (see vercel.json). Vercel sends "Authorization: Bearer <CRON_SECRET>".
+export async function GET(request: NextRequest) {
+  if (!process.env.CRON_SECRET || request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const out = { unconfirmed: 0, availabilityReminders: 0 };
+
+  // 1. Trainers who haven't confirmed a booking in time → tell the booking managers and admins.
+  const { hours } = await getSetting("trainer_response", { hours: 48 });
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  const { data } = await db().from("bookings").select(BOOKING_SELECT).eq("status", "awaiting_trainer").lt("decided_at", cutoff).is("reminder_sent_at", null);
+  for (const b of (data ?? []) as BookingRow[]) {
+    const title = `${b.trainers?.full_name} hasn't confirmed ${b.program_name} — Day ${b.day_number}`;
+    await notify([await userById(b.created_by), ...(await usersWithRoles("approver", "admin"))], {
+      title,
+      body: `No response after ${hours} hours. Follow up or book another trainer.`,
+      link: `/bookings/${b.id}`,
+      email: { subject: title, intro: `The trainer hasn't confirmed this assignment within ${hours} hours. Please follow up or book someone else.`, rows: bookingRows(b) },
+    });
+    await notify([await trainerRecipient(b)], {
+      title: `Reminder: please confirm ${trainerTitle(b)}`,
+      link: `/me/bookings/${b.id}`,
+      email: { subject: `Reminder: please confirm your training on ${fmtDate(b.date, { day: "numeric", month: "long" })}`, intro: "You haven't confirmed this assignment yet.", rows: bookingRows(b, true), content: b.content, button: "Confirm the assignment" },
+    });
+    await db().from("bookings").update({ reminder_sent_at: new Date().toISOString() }).eq("id", b.id);
+    out.unconfirmed++;
+  }
+
+  // 2. Monthly availability: remind trainers 3 days before the deadline and on the day.
+  const { day_of_month } = await getSetting("availability_deadline", { day_of_month: 25 });
+  const today = todayISO();
+  const day = Number(today.slice(8));
+  if (day === day_of_month || day === day_of_month - 3) {
+    const nextMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 1)).toISOString().slice(0, 10);
+    const label = new Date(nextMonth).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+    const [{ data: trainers }, { data: done }] = await Promise.all([
+      db().from("trainers").select("id, full_name, email, user_id").eq("active", true).not("user_id", "is", null),
+      db().from("availability_months").select("trainer_id").eq("month", nextMonth),
+    ]);
+    const submitted = new Set(((done ?? []) as { trainer_id: string }[]).map((d) => d.trainer_id));
+    for (const t of (trainers ?? []) as { id: string; full_name: string; user_id: string }[]) {
+      if (submitted.has(t.id)) continue;
+      await notify([await userById(t.user_id)], {
+        title: `Please confirm your availability for ${label}`,
+        link: `/me/availability?m=${nextMonth.slice(0, 7)}`,
+        email: {
+          subject: `Your availability for ${label} is due${day === day_of_month ? " today" : ` on the ${day_of_month}th`}`,
+          intro: `Please mark the days and slots you're available in <b>${esc(label)}</b> and confirm the month, so Growth can book you.`,
+          button: "Update my availability",
+        },
+      });
+      out.availabilityReminders++;
+    }
+  }
+  return NextResponse.json(out);
+}

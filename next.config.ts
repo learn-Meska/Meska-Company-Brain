@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  serverExternalPackages: ["@react-pdf/renderer"],
+  // the bio PDF reads its fonts from disk at runtime
+  outputFileTracingIncludes: { "/trainers/[id]/bio": ["./src/fonts/**"] },
   turbopack: {
     rules: {
       "*.css": {
