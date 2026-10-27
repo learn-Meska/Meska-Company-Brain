@@ -20,7 +20,8 @@ export function ScoreBar({ value }: { value: number | null }) {
 
 const KIND_LABEL = { audience: "Audience levels", function: "Functions", industry: "Industries" } as const;
 
-export function ProfileView({ t, showContact = true }: { t: TrainerProfile; showContact?: boolean }) {
+// Trainers don't see their own tier for now (showTier=false on "My profile").
+export function ProfileView({ t, showContact = true, showTier = true }: { t: TrainerProfile; showContact?: boolean; showTier?: boolean }) {
   return (
     <div className="space-y-5">
       <section className="card">
@@ -29,7 +30,7 @@ export function ProfileView({ t, showContact = true }: { t: TrainerProfile; show
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="h1">{t.full_name}</h1>
-              <TierBadge tier={t.tier} />
+              {showTier && <TierBadge tier={t.tier} />}
               {!t.active && <span className="badge bg-bad-bg text-bad">Inactive</span>}
             </div>
             {showContact && (
