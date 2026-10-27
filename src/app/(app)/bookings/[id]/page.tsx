@@ -23,7 +23,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
     db().from("audit_log").select("*, app_users(full_name)").eq("booking_id", id).order("created_at"),
     getSetting("cancellation", { notice_hours: 48, min_reason_chars: 150 }),
   ]);
-  const canChange = ACTIVE_STATUSES.includes(b.status) && (canBook(me) || (me.role === "growth" && b.status === "needs_trainer" && b.created_by === me.id));
+  const canChange = ACTIVE_STATUSES.includes(b.status) && (canBook(me) || (me.role === "growth" && ["needs_trainer", "awaiting_trainer"].includes(b.status) && b.created_by === me.id));
   const { requested } = await searchParams;
   const showReason = me.role === "admin";
   return (

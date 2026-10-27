@@ -329,10 +329,11 @@ ${changes.map((c) => `<tr><td style="padding:8px 12px;border-top:1px solid #E1E7
 </table>`;
 }
 
-// Admins and booking managers can change any active training; Growth only their own requests still waiting for a trainer.
+// Admins and booking managers can change any active training; Growth only their own requests until the trainer confirms.
+const GROWTH_EDITABLE = ["needs_trainer", "awaiting_trainer"];
 function mayChange(me: { id: string; role: string }, b: BookingRow) {
   if (me.role === "admin" || me.role === "approver") return true;
-  return me.role === "growth" && b.status === "needs_trainer" && b.created_by === me.id;
+  return me.role === "growth" && GROWTH_EDITABLE.includes(b.status) && b.created_by === me.id;
 }
 
 export async function editBooking(fd: FormData) {
