@@ -60,8 +60,11 @@ export async function findForDays(input: { audienceId: string; industryId: strin
 
 /* ---------- Request a training (trainer optional) ---------- */
 
+export type ClientContact = { name: string; email: string; mobile: string };
+
 export type NewRequest = {
   program_name: string;
+  contact: ClientContact;
   audience_id: string;
   function_id: string;
   industry_id: string;
@@ -70,6 +73,15 @@ export type NewRequest = {
 };
 
 type Filters = { audience_id: string; function_id: string; industry_id: string };
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function contactError(c: ClientContact) {
+  if (!c.name.trim()) return "Enter the client contact's name.";
+  if (!EMAIL.test(c.email.trim())) return "Enter a valid email for the client contact.";
+  if (c.mobile.replace(/\D/g, "").length < 7) return "Enter the client contact's mobile number.";
+  return null;
+}
+const contactFields = (c: ClientContact) => ({ contact_name: c.name.trim(), contact_email: c.email.trim().toLowerCase(), contact_mobile: c.mobile.trim() });
+
 const dayError = (d: { day_number: number; date: string; start: string; end: string }) =>
   !DATE.test(d.date)
     ? `Pick a date for Day ${d.day_number}.`
@@ -99,6 +111,8 @@ export async function requestTrainerOptions(input: Filters & { days: { day_numbe
 export async function createRequest(input: NewRequest) {
   const me = await requireRole("growth", "admin", "approver");
   if (!input.program_name.trim()) return { error: "Enter the program name." };
+  const ce = contactError(input.contact);
+  if (ce) return { error: ce };
   if (!input.audience_id || !input.function_id || !input.industry_id) return { error: "Pick the audience level, function and industry." };
   if (!input.days.length) return { error: "Add at least one training day." };
   for (const d of input.days) {
@@ -128,6 +142,7 @@ export async function createRequest(input: NewRequest) {
         start_time: d.start,
         end_time: d.end,
         location: d.location.trim() || null,
+        ...contactFields(input.contact),
         audience_id: input.audience_id,
         function_id: input.function_id,
         industry_id: input.industry_id,
@@ -158,6 +173,7 @@ export async function createRequest(input: NewRequest) {
       }${sameNote ? " <b>Same trainer preferred for all days.</b>" : ""}`,
       rows: [
         ["Program", esc(input.program_name)],
+        ["Client contact", `${esc(input.contact.name)} · ${esc(input.contact.email)} · ${esc(input.contact.mobile)}`],
         ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${b.trainers ? esc(b.trainers.full_name) : "<i>needs a trainer</i>"}`] as [string, string]),
         ["Audience", esc(rows[0].audience?.name ?? "")],
         ["Function", esc(rows[0].func?.name ?? "")],
@@ -369,6 +385,25 @@ export async function editBooking(fd: FormData) {
   refresh();
   revalidatePath(`/bookings/${id}`);
   return { ok: fresh.trainer_id ? "Saved. The trainer, admins and booking managers were notified of the changes." : "Saved. Admins and booking managers were notified of the changes." };
+}
+
+/* ---------- Client contact (whole request) ---------- */
+
+// The booking team, or the Growth member who made the request, can correct the client contact for every day of it.
+export async function updateContact(fd: FormData) {
+  const me = await requireRole("admin", "approver", "growth");
+  const id = String(fd.get("id"));
+  const [b] = await loadBookings([id]);
+  if (!b || !(me.role === "admin" || me.role === "approver" || b.created_by === me.id)) return { error: "Booking not found." };
+  const c = { name: String(fd.get("contact_name") ?? ""), email: String(fd.get("contact_email") ?? ""), mobile: String(fd.get("contact_mobile") ?? "") };
+  const ce = contactError(c);
+  if (ce) return { error: ce };
+  const q = db().from("bookings").update(contactFields(c));
+  const { error } = await (b.batch_id ? q.eq("batch_id", b.batch_id) : q.eq("id", id));
+  if (error) return { error: friendlyError(error.message) };
+  await audit(me.id, "client_contact_updated", id, { program: b.program_name, contact: contactFields(c) });
+  revalidatePath(`/bookings/${id}`);
+  return { ok: b.batch_id ? "Client contact saved for every day of this request." : "Client contact saved." };
 }
 
 /* ---------- Cancel ---------- */

@@ -24,6 +24,7 @@ function addDays(d: string, n: number) {
 export function RequestBuilder({ audience, functions, industries, today, trainerRequired }: { audience: Opt[]; functions: Opt[]; industries: Opt[]; today: string; trainerRequired: boolean }) {
   const router = useRouter();
   const [f, setF] = useState({ program_name: "", audience_id: "", function_id: "", industry_id: "" });
+  const [contact, setContact] = useState({ name: "", email: "", mobile: "" });
   const [same, setSame] = useState(false);
   const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", content: "", trainerId: "" }]);
   const [err, setErr] = useState("");
@@ -58,6 +59,7 @@ export function RequestBuilder({ audience, functions, industries, today, trainer
     start(async () => {
       const r = await createRequest({
         ...f,
+        contact,
         same_trainer: same,
         days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end, location: d.location, content: d.content, trainer_id: d.trainerId || undefined })),
       });
@@ -96,6 +98,14 @@ export function RequestBuilder({ audience, functions, industries, today, trainer
             </div>
           ))}
         </div>
+        <fieldset>
+          <legend className="label">Client point of contact * <span className="font-normal normal-case text-faint">(once for all days)</span></legend>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <input aria-label="Contact name" className="input" placeholder="Full name" autoComplete="off" value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} />
+            <input aria-label="Contact email" type="email" className="input" placeholder="Email" autoComplete="off" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} />
+            <input aria-label="Contact mobile" type="tel" className="input" placeholder="Mobile, e.g. +20 100 000 0000" autoComplete="off" value={contact.mobile} onChange={(e) => setContact({ ...contact, mobile: e.target.value })} />
+          </div>
+        </fieldset>
       </section>
 
       <section className="card space-y-4">

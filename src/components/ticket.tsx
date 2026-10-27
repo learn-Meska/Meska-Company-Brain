@@ -45,6 +45,17 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
     ["Industry", b.industry?.name],
     ["Skills", ((skills ?? []) as { name: string }[]).map((s) => s.name).join(", ") || "—"],
   ];
+  // the client contact is for the Meska team only
+  if (!trainerView && b.contact_name) {
+    rows.push([
+      "Client contact",
+      <span key="c">
+        {b.contact_name}
+        {b.contact_email && <> · <a href={`mailto:${b.contact_email}`} className="text-blue hover:underline">{b.contact_email}</a></>}
+        {b.contact_mobile && <> · <a href={`tel:${b.contact_mobile.replace(/[^\d+]/g, "")}`} className="text-blue hover:underline">{b.contact_mobile}</a></>}
+      </span>,
+    ]);
+  }
   return (
     <section className="card space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-2">

@@ -8,7 +8,7 @@ import { db } from "@/lib/supabase";
 import { ACTIVE_STATUSES, fmtDateTime } from "@/lib/format";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 import { getSetting } from "@/lib/scoring";
-import { cancelBooking, editBooking } from "../actions";
+import { cancelBooking, editBooking, updateContact } from "../actions";
 
 type Log = { id: string; action: string; details: Record<string, unknown> | null; created_at: string; app_users: { full_name: string } | null };
 
@@ -29,7 +29,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   return (
     <div className="space-y-5">
       <Link href="/bookings" className="text-sm text-blue hover:underline">← All bookings</Link>
-      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Request sent. It&apos;s on the calendar as “Needs a trainer” and the booking team was notified.</p>}
+      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and the booking team was notified." : "Request sent. It's on the calendar as “Needs a trainer” and the booking team was notified."}</p>}
       {b.status === "needs_trainer" && canBook(me) && (
         <section className="card border-2 border-[#F4A9C4]">
           <div className="eyebrow">Needs a trainer</div>
@@ -40,6 +40,20 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
       )}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <Ticket b={b} canUpload={me.role === "admin" && b.status !== "cancelled"} />
+
+      {ACTIVE_STATUSES.includes(b.status) && (canBook(me) || b.created_by === me.id) && (
+        <section className="card">
+          <h2 className="h2 mb-1">Client point of contact</h2>
+          <p className="mb-3 text-xs text-muted">{b.batch_id ? "Saved for every day of this request. " : ""}Only the Meska team sees it; trainers don&apos;t.</p>
+          <Form action={updateContact} className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+            <input type="hidden" name="id" value={b.id} />
+            <div><label className="label">Name</label><input name="contact_name" defaultValue={b.contact_name ?? ""} className="input" required /></div>
+            <div><label className="label">Email</label><input name="contact_email" type="email" defaultValue={b.contact_email ?? ""} className="input" required /></div>
+            <div><label className="label">Mobile</label><input name="contact_mobile" type="tel" defaultValue={b.contact_mobile ?? ""} className="input" required /></div>
+            <Submit className="btn-ghost">Save contact</Submit>
+          </Form>
+        </section>
+      )}
 
       {canChange && (
         <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">

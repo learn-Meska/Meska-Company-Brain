@@ -75,6 +75,10 @@ export type BookingRow = {
   end_time: string;
   slots: string[];
   location: string | null;
+  // client point of contact, the same on every day of a request (never shown to trainers)
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_mobile: string | null;
   audience_id: string | null;
   function_id: string | null;
   industry_id: string | null;
