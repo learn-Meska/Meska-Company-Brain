@@ -38,6 +38,7 @@ export function MonthCalendar({
   showTrainer = true,
   toolbar,
   qs,
+  available,
 }: {
   grid: ReturnType<typeof monthGrid>;
   bookings: BookingRow[];
@@ -46,6 +47,8 @@ export function MonthCalendar({
   showTrainer?: boolean;
   toolbar?: ReactNode;
   qs: (month: string) => string;
+  // date -> free slots, shown in green when a single trainer is picked
+  available?: Map<string, string[]>;
 }) {
   const byDay = new Map<string, BookingRow[]>();
   for (const b of bookings) byDay.set(b.date, [...(byDay.get(b.date) ?? []), b]);
@@ -72,6 +75,7 @@ export function MonthCalendar({
         <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.confirmed}`} /> Confirmed</span>
         <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.awaiting_trainer}`} /> Pending: waiting for the trainer to confirm</span>
         <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.needs_trainer}`} /> Needs a trainer</span>
+        {available && <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded border border-[#86D3A8] bg-[#DDF5E7]" /> Trainer available (free slot)</span>}
         <span>✎ = trainer brief received</span>
         <span>{total} {total === 1 ? "training" : "trainings"} this month</span>
       </div>
@@ -84,9 +88,17 @@ export function MonthCalendar({
             const inMonth = date.slice(0, 7) === grid.month;
             const dow = i % 7;
             const items = byDay.get(date) ?? [];
+            const free = available?.get(date);
             return (
-              <div key={date} className={`min-h-36 p-2 ${inMonth ? "bg-white" : "bg-[#EDEEF1]"} ${date === today ? "ring-2 ring-inset ring-blue" : ""}`}>
-                <div className={`mb-1 text-2xl font-bold ${!inMonth ? "text-faint" : dow === 0 ? "text-[#F0567A]" : dow === 6 ? "text-[#4CC3F0]" : "text-ink"}`}>{Number(date.slice(8))}</div>
+              <div key={date} className={`min-h-36 p-2 ${free ? "bg-[#DDF5E7]" : inMonth ? "bg-white" : "bg-[#EDEEF1]"} ${date === today ? "ring-2 ring-inset ring-blue" : ""}`}>
+                <div className="mb-1 flex items-start justify-between gap-1">
+                  <span className={`text-2xl font-bold ${!inMonth ? "text-faint" : dow === 0 ? "text-[#F0567A]" : dow === 6 ? "text-[#4CC3F0]" : "text-ink"}`}>{Number(date.slice(8))}</span>
+                  {free && (
+                    <span className="rounded-full bg-[#1F9D5B] px-1.5 py-0.5 text-[10px] font-semibold text-white" title="Marked available, not booked yet">
+                      {free.map((s) => (s === "morning" ? "Morning" : "Evening")).join(" + ")}
+                    </span>
+                  )}
+                </div>
                 <div className="space-y-1.5">
                   {items.map((b) => (
                     <Link
