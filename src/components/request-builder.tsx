@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { createRequest } from "@/app/(app)/bookings/actions";
+import { useEffect, useState, useTransition } from "react";
+import { createRequest, requestTrainerOptions } from "@/app/(app)/bookings/actions";
 
 type Opt = { id: string; name: string };
-type Day = { key: number; date: string; start: string; end: string; location: string; skillIds: string[]; content: string };
+type Day = { key: number; date: string; start: string; end: string; location: string; content: string; trainerId: string };
+type TrainerOpt = { id: string; full_name: string; title: string | null };
 
 const PRESETS = [
   { label: "Morning 10 AM – 3 PM", start: "10:00", end: "15:00" },
@@ -19,18 +20,38 @@ function addDays(d: string, n: number) {
   return x.toISOString().slice(0, 10);
 }
 
-export function RequestBuilder({ audience, functions, industries, skills, today }: { audience: Opt[]; functions: Opt[]; industries: Opt[]; skills: Opt[]; today: string }) {
+// trainerRequired: Growth must choose the trainer for every day; booking staff may leave it to assign later.
+export function RequestBuilder({ audience, functions, industries, today, trainerRequired }: { audience: Opt[]; functions: Opt[]; industries: Opt[]; today: string; trainerRequired: boolean }) {
   const router = useRouter();
   const [f, setF] = useState({ program_name: "", audience_id: "", function_id: "", industry_id: "" });
   const [same, setSame] = useState(false);
-  const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", skillIds: [], content: "" }]);
+  const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", content: "", trainerId: "" }]);
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
+  // trainers free at each day's time who match the audience, function and industry
+  const [options, setOptions] = useState<{ query: string; days: TrainerOpt[][] | null; error: string }>({ query: "", days: null, error: "" });
   const patch = (key: number, p: Partial<Day>) => setDays((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d)));
+
+  const ready = !!(f.audience_id && f.function_id && f.industry_id) && days.every((d) => d.date && d.start && d.end);
+  const query = ready ? JSON.stringify([f.audience_id, f.function_id, f.industry_id, days.map((d) => [d.date, d.start, d.end])]) : "";
+  useEffect(() => {
+    if (!query) return;
+    const t = setTimeout(async () => {
+      const r = await requestTrainerOptions({ ...f, days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end })) });
+      setOptions({ query, days: "days" in r && r.days ? r.days : null, error: r.error ?? "" });
+      // drop a pick that no longer fits
+      if ("days" in r && r.days) setDays((ds) => ds.map((d, i) => (d.trainerId && !r.days![i]?.some((x) => x.id === d.trainerId) ? { ...d, trainerId: "" } : d)));
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `query` captures every input that matters
+  }, [query]);
+  const opts = options.query === query ? options.days : null;
+  const common = opts && opts.length > 1 ? opts[0].filter((t) => opts.every((l) => l.some((x) => x.id === t.id))) : [];
+  const sameId = same && days.length > 1 && days.every((d) => d.trainerId === days[0].trainerId) ? days[0].trainerId : "";
 
   function addDay() {
     const last = days[days.length - 1];
-    setDays([...days, { ...last, key: last.key + 1, date: last.date ? addDays(last.date, 1) : "", content: "" }]);
+    setDays([...days, { ...last, key: last.key + 1, date: last.date ? addDays(last.date, 1) : "", content: "", trainerId: same ? last.trainerId : "" }]);
   }
   function submit() {
     setErr("");
@@ -38,7 +59,7 @@ export function RequestBuilder({ audience, functions, industries, skills, today 
       const r = await createRequest({
         ...f,
         same_trainer: same,
-        days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end, location: d.location, skill_ids: d.skillIds, content: d.content })),
+        days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end, location: d.location, content: d.content, trainer_id: d.trainerId || undefined })),
       });
       if (r.error) return setErr(r.error);
       router.push(r.ids?.length === 1 ? `/bookings/${r.ids[0]}?requested=1` : "/bookings?requested=1");
@@ -82,7 +103,7 @@ export function RequestBuilder({ audience, functions, industries, skills, today 
           <div>
             <div className="eyebrow">Step 2</div>
             <h2 className="h2">Training days</h2>
-            <p className="text-sm text-muted">Add each day with its own content. The booking team assigns the trainer.</p>
+            <p className="text-sm text-muted">Add each day with its own content{trainerRequired ? ", then choose the trainer" : ""}.</p>
           </div>
           <button type="button" onClick={addDay} className="btn-ghost">+ Add another day</button>
         </div>
@@ -123,23 +144,30 @@ export function RequestBuilder({ audience, functions, industries, skills, today 
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div>
-                <div className="label">Skills this day&apos;s content needs</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {skills.map((s) => {
-                    const on = d.skillIds.includes(s.id);
-                    return (
-                      <button
-                        key={s.id}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => patch(d.key, { skillIds: on ? d.skillIds.filter((x) => x !== s.id) : [...d.skillIds, s.id] })}
-                        className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${on ? "border-navy bg-navy text-white" : "border-line bg-surface hover:border-blue"}`}
-                      >
-                        {s.name}
-                      </button>
-                    );
-                  })}
-                </div>
+                <label className="label" htmlFor={`t${d.key}`}>Trainer{trainerRequired ? " *" : ""}</label>
+                {!ready ? (
+                  <p className="text-xs text-muted">Pick the audience, function, industry and the date to see the available trainers.</p>
+                ) : !opts ? (
+                  <p className="text-xs text-muted">{options.query === query && options.error ? options.error : "Finding available trainers…"}</p>
+                ) : opts[i].length === 0 ? (
+                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No matching trainer is free at this time. Try another date or time{trainerRequired ? ", or contact the booking team" : ""}.</p>
+                ) : (
+                  <select
+                    id={`t${d.key}`}
+                    className="input"
+                    value={d.trainerId}
+                    disabled={!!sameId}
+                    onChange={(e) => patch(d.key, { trainerId: e.target.value })}
+                  >
+                    <option value="">{trainerRequired ? "Choose a trainer…" : "Leave to the booking team"}</option>
+                    {opts[i].map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.full_name}
+                        {t.title ? ` — ${t.title}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div>
                 <label className="label" htmlFor={`c${d.key}`}>Content to be delivered on this day *</label>
@@ -149,18 +177,46 @@ export function RequestBuilder({ audience, functions, industries, skills, today 
           </div>
         ))}
         {days.length > 1 && (
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={same} onChange={(e) => setSame(e.target.checked)} /> Prefer the same trainer for all days
-          </label>
+          <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface2 px-3 py-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={same}
+                onChange={(e) => {
+                  setSame(e.target.checked);
+                  if (!e.target.checked) setDays((ds) => ds.map((d) => ({ ...d, trainerId: "" })));
+                }}
+              />{" "}
+              Same trainer for all days
+            </label>
+            {same &&
+              (opts && common.length ? (
+                <select
+                  className="input w-auto py-1.5"
+                  aria-label="Trainer for all days"
+                  value={sameId}
+                  onChange={(e) => setDays((ds) => ds.map((d) => ({ ...d, trainerId: e.target.value })))}
+                >
+                  <option value="">Choose a trainer free on all days…</option>
+                  {common.map((t) => (
+                    <option key={t.id} value={t.id}>{t.full_name}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-xs text-muted">{opts ? "No trainer is free on all these days." : "Fill in the days to see who is free on all of them."}</span>
+              ))}
+          </div>
         )}
       </section>
 
       {err && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{err}</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button className="btn" disabled={pending} onClick={submit}>
+        <button className="btn" disabled={pending || (trainerRequired && days.some((d) => !d.trainerId))} onClick={submit}>
           {pending ? "Sending…" : days.length > 1 ? `Request ${days.length} days` : "Request training"}
         </button>
-        <span className="text-xs text-muted">It goes on the calendar as “Needs a trainer” and the booking team is notified.</span>
+        <span className="text-xs text-muted">
+          {trainerRequired ? "The trainer is emailed to confirm and the booking team is notified." : "Days with a trainer are emailed to the trainer; the rest go on the calendar as “Needs a trainer”."}
+        </span>
       </div>
     </div>
   );
