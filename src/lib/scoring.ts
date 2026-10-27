@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "./supabase";
 import { todayISO } from "./format";
+import { nps } from "./survey";
 
 export type Category = { id: string; name: string; weight: number; source: "manual" | "feedback"; sort: number };
 export type Tier = { id: string; name: string; min_score: number; color: string; audience_ids: string[] };
@@ -31,7 +32,8 @@ export type TrainerProfile = {
   calculated_total: number;
   score_override: number | null;
   tier: Tier | null;
-  feedback: { average: number | null; content: number | null; responses: number; sessions: number; liked: string[]; improve: string[] };
+  // average = imported scorecard rating (1–5); nps = QR survey Net Promoter Score (−100 to 100)
+  feedback: { average: number | null; nps: number | null; npsResponses: number; responses: number; sessions: number; reasons: string[] };
   delivered: number;
 };
 
@@ -78,7 +80,7 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
     sb.from("bookings").select("trainer_id, date").eq("status", "confirmed").lt("date", todayISO()).in("trainer_id", tIds),
     sb.from("delivered_history").select("trainer_name, total, as_of"),
     // feedback collected in this system through the QR code
-    sb.from("feedback_responses").select("trainer_score, content_score, liked, improve, created_at, bookings!inner(trainer_id)").in("bookings.trainer_id", tIds).order("created_at", { ascending: false }),
+    sb.from("feedback_responses").select("recommend, reason, created_at, bookings!inner(trainer_id)").in("bookings.trainer_id", tIds).order("created_at", { ascending: false }),
   ]);
   const categories = ((cats.data ?? []) as Category[]).map((c) => ({ ...c, weight: Number(c.weight) }));
 
@@ -98,13 +100,17 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
     const fb = ((feedback.data ?? []) as { trainer_name: string; responses: number; delivery: number | null }[]).filter(
       (f) => isNamed(f.trainer_name) && f.delivery != null,
     );
-    const mine = ((live.data ?? []) as unknown as { trainer_score: number; content_score: number; liked: string | null; improve: string | null; bookings: { trainer_id: string } }[]).filter(
-      (r) => r.bookings.trainer_id === t.id,
+    const mine = ((live.data ?? []) as unknown as { recommend: number | null; reason: string | null; bookings: { trainer_id: string } }[]).filter(
+      (r) => r.bookings.trainer_id === t.id && r.recommend != null,
     );
-    // Imported scorecard sessions and QR responses are combined, weighted by number of responses.
-    const responses = fb.reduce((s, f) => s + f.responses, 0) + mine.length;
-    const fbAvg = responses ? (fb.reduce((s, f) => s + Number(f.delivery) * f.responses, 0) + mine.reduce((s, r) => s + r.trainer_score, 0)) / responses : null;
-    const contentAvg = mine.length ? mine.reduce((s, r) => s + r.content_score, 0) / mine.length : null;
+    const scorecardResponses = fb.reduce((s, f) => s + f.responses, 0);
+    const fbAvg = scorecardResponses ? fb.reduce((s, f) => s + Number(f.delivery) * f.responses, 0) / scorecardResponses : null;
+    const trainerNps = nps(mine.map((r) => r.recommend as number));
+    const responses = scorecardResponses + mine.length;
+    // Client Feedback (0–100): scorecard rating ×20 and the survey NPS (negative counts as 0), weighted by responses.
+    const feedbackScore = responses
+      ? ((fbAvg ?? 0) * 20 * scorecardResponses + Math.max(0, trainerNps ?? 0) * mine.length) / responses
+      : null;
 
     const catScores = categories.map((c) => {
       let score: number | null = null;
@@ -114,7 +120,7 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
         );
         score = row ? Number(row.score) : null;
       } else if (c.source === "feedback") {
-        score = fbAvg != null ? Math.round((fbAvg / 5) * 1000) / 10 : null;
+        score = feedbackScore != null ? Math.round(feedbackScore * 10) / 10 : null;
       }
       return { id: c.id, name: c.name, weight: c.weight, source: c.source, score };
     });
@@ -136,11 +142,11 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
       tier: tierFor(total, tiers),
       feedback: {
         average: fbAvg != null ? Math.round(fbAvg * 100) / 100 : null,
-        content: contentAvg != null ? Math.round(contentAvg * 100) / 100 : null,
+        nps: trainerNps,
+        npsResponses: mine.length,
         responses,
         sessions: fb.length,
-        liked: mine.map((r) => r.liked?.trim()).filter((x): x is string => !!x).slice(0, 10),
-        improve: mine.map((r) => r.improve?.trim()).filter((x): x is string => !!x).slice(0, 10),
+        reasons: mine.map((r) => r.reason?.trim()).filter((x): x is string => !!x).slice(0, 10),
       },
       // Scorecard total up to its import date, plus trainings confirmed in this system after it.
       delivered: (() => {

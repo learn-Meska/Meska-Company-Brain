@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { TierBadge } from "@/components/profile";
+import { fmtNps } from "@/lib/survey";
 import { canManageTrainers, requireRole } from "@/lib/auth";
 import { getTrainerProfiles } from "@/lib/scoring";
 
@@ -25,6 +26,7 @@ export default async function TrainersPage() {
               <div className="mt-2 flex gap-4 text-xs text-muted">
                 <span><b className="text-ink">{t.total}</b> score</span>
                 <span><b className="text-ink">{t.feedback.average?.toFixed(2) ?? "—"}</b> feedback</span>
+                {t.feedback.nps != null && <span><b className="text-ink">{fmtNps(t.feedback.nps)}</b> NPS</span>}
                 <span><b className="text-ink">{t.delivered}</b> delivered</span>
               </div>
             </div>

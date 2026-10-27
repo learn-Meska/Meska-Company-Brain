@@ -1,4 +1,5 @@
 import { initials } from "@/lib/format";
+import { fmtNps } from "@/lib/survey";
 import type { TrainerProfile } from "@/lib/scoring";
 
 export function TierBadge({ tier }: { tier: TrainerProfile["tier"] }) {
@@ -41,14 +42,18 @@ export function ProfileView({ t, showContact = true, showTier = true }: { t: Tra
           </div>
         </div>
         {t.bio && <p className="mt-4 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed text-ink">{t.bio}</p>}
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <div className="stat-hot rounded-xl p-3 text-white">
             <div className="text-2xl font-semibold tabular-nums">{t.total}</div>
             <div className="text-[10.5px] uppercase tracking-wider text-[#93C5FD]">Total score / 100{t.score_override != null && " · set by admin"}</div>
           </div>
           <div className="rounded-xl border border-ice2 bg-ice p-3">
             <div className="text-2xl font-bold tabular-nums text-royal-deep">{t.feedback.average != null ? t.feedback.average.toFixed(2) : "—"}</div>
-            <div className="text-[10.5px] font-medium uppercase tracking-wider text-[#3B82F6]">Overall feedback / 5</div>
+            <div className="text-[10.5px] font-medium uppercase tracking-wider text-[#3B82F6]">Scorecard rating / 5</div>
+          </div>
+          <div className="rounded-xl border border-ice2 bg-ice p-3">
+            <div className="text-2xl font-bold tabular-nums text-royal-deep">{fmtNps(t.feedback.nps)}</div>
+            <div className="text-[10.5px] font-medium uppercase tracking-wider text-[#3B82F6]">Survey NPS · {t.feedback.npsResponses} {t.feedback.npsResponses === 1 ? "response" : "responses"}</div>
           </div>
           <div className="rounded-xl border border-ice2 bg-ice p-3">
             <div className="text-2xl font-bold tabular-nums text-royal-deep">{t.delivered}</div>
@@ -97,30 +102,14 @@ export function ProfileView({ t, showContact = true, showTier = true }: { t: Tra
           </div>
         </section>
       </div>
-      {(t.feedback.liked.length > 0 || t.feedback.improve.length > 0) && (
+      {t.feedback.reasons.length > 0 && (
         <section className="card">
           <h2 className="h2 mb-3">What participants say</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {(
-              [
-                ["Positive", t.feedback.liked, "bg-good-bg text-good"],
-                ["To improve", t.feedback.improve, "bg-warn-bg text-warn"],
-              ] as const
-            ).map(([label, list, tone]) => (
-              <div key={label}>
-                <div className={`mb-2 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone}`}>{label}</div>
-                {list.length ? (
-                  <ul className="space-y-1.5 text-sm">
-                    {list.map((c, i) => (
-                      <li key={i} className="rounded-lg bg-surface2 px-3 py-2">“{c}”</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-xs text-faint">No comments yet.</p>
-                )}
-              </div>
+          <ul className="space-y-1.5 text-sm">
+            {t.feedback.reasons.map((c, i) => (
+              <li key={i} className="rounded-lg bg-surface2 px-3 py-2">“{c}”</li>
             ))}
-          </div>
+          </ul>
         </section>
       )}
     </div>
