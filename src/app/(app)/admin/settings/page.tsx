@@ -44,11 +44,11 @@ export default async function SettingsPage() {
         <p className="mb-3 text-sm text-muted">Growth picks the skills a training needs; only trainers with all of them are shown.</p>
         <div className="mb-3 flex flex-wrap gap-2">
           {((skills ?? []) as { id: string; name: string }[]).map((s) => (
-            <form key={s.id} action={deleteSkill} className="chip gap-1.5">
+            <Form key={s.id} action={deleteSkill} className="chip gap-1.5">
               <input type="hidden" name="id" value={s.id} />
               {s.name}
               <button className="text-faint hover:text-bad" title="Remove skill">×</button>
-            </form>
+            </Form>
           ))}
         </div>
         <Form action={addSkill} reset className="flex max-w-md gap-2">
@@ -112,10 +112,10 @@ export default async function SettingsPage() {
                     </div>
                     <Submit className="btn-ghost">Save</Submit>
                   </Form>
-                  <form action={deleteCategory}>
+                  <Form action={deleteCategory}>
                     <input type="hidden" name="id" value={c.id} />
                     <button className="btn-ghost text-bad">Delete</button>
-                  </form>
+                  </Form>
                 </div>
               ))}
               <Form action={saveCategory} reset className="flex flex-wrap items-end gap-2 rounded-xl border border-dashed border-line p-3">
@@ -171,10 +171,10 @@ export default async function SettingsPage() {
                       ))}
                     </div>
                   </Form>
-                  <form action={deleteTier} className="mt-2">
+                  <Form action={deleteTier} className="mt-2">
                     <input type="hidden" name="id" value={t.id} />
                     <button className="text-xs text-bad hover:underline">Delete tier</button>
-                  </form>
+                  </Form>
                 </div>
               ))}
               <Form action={saveTier} reset className="space-y-2 rounded-xl border border-dashed border-line p-3">

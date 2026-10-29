@@ -73,7 +73,7 @@ export function AvailabilityEditor({
       const [date, slot] = k.split("|");
       return { date, slot: slot as Slot };
     });
-    start(async () => setMsg((await saveAvailability(month, cells, submit)) ?? null));
+    start(async () => setMsg((await saveAvailability(month, cells, submit).catch(() => ({ error: "That didn't go through. Check your connection and try again." }))) ?? null));
   }
 
   const label = first.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -81,7 +81,7 @@ export function AvailabilityEditor({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Link href={`?m=${prev}`} className="btn-ghost btn-sm">←</Link>
+          {prev >= today.slice(0, 7) ? <Link href={`?m=${prev}`} className="btn-ghost btn-sm">←</Link> : <span className="btn-ghost btn-sm opacity-40" aria-hidden>←</span>}
           <h2 className="h2 min-w-44 text-center">{label}</h2>
           <Link href={`?m=${next}`} className="btn-ghost btn-sm">→</Link>
         </div>
@@ -137,7 +137,7 @@ export function AvailabilityEditor({
       <div className="flex flex-wrap items-center gap-3">
         <button className="btn" disabled={pending} onClick={() => save(true)}>{pending ? "Saving…" : "Save & confirm this month"}</button>
         <button className="btn-ghost" disabled={pending || !dirty} onClick={() => save(false)}>Save draft</button>
-        <span className="text-xs text-muted">{submittedAt ? `Confirmed on ${new Date(submittedAt).toLocaleDateString("en-GB")}` : "Not confirmed yet for this month"}</span>
+        <span className="text-xs text-muted">{submittedAt ? `Confirmed on ${new Date(submittedAt).toLocaleDateString("en-GB", { timeZone: "Africa/Cairo" })}` : "Not confirmed yet for this month"}</span>
       </div>
     </div>
   );

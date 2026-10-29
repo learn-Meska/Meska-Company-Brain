@@ -1,5 +1,5 @@
 import "server-only";
-import { db } from "./supabase";
+import { db, fetchAll } from "./supabase";
 import { todayISO } from "./format";
 
 export type Category = { id: string; name: string; weight: number; source: "manual" | "feedback"; sort: number };
@@ -71,14 +71,14 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
   const [cats, tiers, ts, tl, scores, feedback, delivered, history, live] = await Promise.all([
     sb.from("score_categories").select("*").order("sort"),
     getTiers(),
-    sb.from("trainer_skills").select("trainer_id, skills(id, name)").in("trainer_id", tIds),
-    sb.from("trainer_lookups").select("trainer_id, lookups(id, kind, name, sort)").in("trainer_id", tIds),
-    sb.from("trainer_scores").select("*").in("trainer_id", tIds),
-    sb.from("feedback_sessions").select("trainer_name, responses, delivery"),
-    sb.from("bookings").select("trainer_id, date").eq("status", "confirmed").lt("date", todayISO()).in("trainer_id", tIds),
-    sb.from("delivered_history").select("trainer_name, total, as_of"),
+    fetchAll((f, t) => sb.from("trainer_skills").select("trainer_id, skills(id, name)").in("trainer_id", tIds).order("trainer_id").order("skill_id").range(f, t)),
+    fetchAll((f, t) => sb.from("trainer_lookups").select("trainer_id, lookups(id, kind, name, sort)").in("trainer_id", tIds).order("trainer_id").order("lookup_id").range(f, t)),
+    fetchAll((f, t) => sb.from("trainer_scores").select("*").in("trainer_id", tIds).order("trainer_id").order("category_id").range(f, t)),
+    fetchAll((f, t) => sb.from("feedback_sessions").select("trainer_name, responses, delivery").order("id").range(f, t)),
+    fetchAll((f, t) => sb.from("bookings").select("trainer_id, date").eq("status", "confirmed").lt("date", todayISO()).in("trainer_id", tIds).order("id").range(f, t)),
+    fetchAll((f, t) => sb.from("delivered_history").select("trainer_name, total, as_of").order("trainer_name").order("as_of").range(f, t)),
     // feedback collected in this system through the QR code
-    sb.from("feedback_responses").select("trainer_score, content_score, liked, improve, created_at, bookings!inner(trainer_id)").in("bookings.trainer_id", tIds).order("created_at", { ascending: false }),
+    fetchAll((f, t) => sb.from("feedback_responses").select("trainer_score, content_score, liked, improve, created_at, bookings!inner(trainer_id)").in("bookings.trainer_id", tIds).order("created_at", { ascending: false }).order("id").range(f, t)),
   ]);
   const categories = ((cats.data ?? []) as Category[]).map((c) => ({ ...c, weight: Number(c.weight) }));
 
@@ -86,10 +86,12 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
     const skills = ((ts.data ?? []) as unknown as { trainer_id: string; skills: { id: string; name: string } }[])
       .filter((x) => x.trainer_id === t.id)
       .map((x) => x.skills)
+      .filter(Boolean)
       .sort((a, b) => a.name.localeCompare(b.name));
     const lookups = ((tl.data ?? []) as unknown as { trainer_id: string; lookups: TrainerProfile["lookups"][number] & { sort: number } }[])
       .filter((x) => x.trainer_id === t.id)
       .map((x) => x.lookups)
+      .filter(Boolean)
       .sort((a, b) => a.sort - b.sort);
 
     // scorecard rows are matched by name; feedback_name covers a different spelling there

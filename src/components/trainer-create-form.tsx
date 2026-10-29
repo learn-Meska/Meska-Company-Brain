@@ -24,7 +24,15 @@ export function TrainerCreateForm({ children }: { children: ReactNode }) {
     fd.delete("photo");
     fd.delete("cv");
     setBusy("Saving profile…");
-    const r = await createTrainer(fd);
+    let r: Awaited<ReturnType<typeof createTrainer>>;
+    try {
+      r = await createTrainer(fd);
+    } catch (e) {
+      console.error(e);
+      setBusy("");
+      // It may have been saved before the connection dropped, so send them to the list rather than invite a duplicate.
+      return setErr("The connection dropped while saving. Check the trainers list before trying again, in case the profile was created.");
+    }
     if (!r || "error" in r || !("id" in r)) {
       setBusy("");
       return setErr((r && "error" in r && r.error) || "Could not create the profile.");

@@ -12,6 +12,7 @@ export default async function MePage() {
     getTrainerProfiles([me.trainer_id]),
     db().from("bookings").select("id, program_name, day_number, date, start_time, end_time").eq("trainer_id", me.trainer_id).eq("status", "awaiting_trainer").gte("date", todayISO()).order("date"),
   ]);
+  if (!t) return <p className="card">Your trainer profile couldn&apos;t be loaded. Please refresh the page, or contact the admin if it keeps happening.</p>;
   const pending = (waiting ?? []) as { id: string; program_name: string; day_number: number; date: string; start_time: string; end_time: string }[];
   return (
     <div className="space-y-5">

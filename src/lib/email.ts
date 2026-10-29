@@ -18,36 +18,72 @@ function mailer() {
 
 export const siteUrl = () => (process.env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
-// Every email is recorded in email_outbox; without Gmail credentials it stays "queued" so nothing is lost.
 export type Attachment = { filename: string; content: string | Buffer; contentType: string };
 
-export async function sendEmail(to: string, subject: string, html: string, extra: Attachment[] = []) {
+// Every email is recorded in email_outbox; without Gmail credentials it stays "queued" so nothing is lost.
+// Resolves to false only when Gmail rejected it (a queued message is not a failure).
+export async function sendEmail(to: string, subject: string, html: string, extra: Attachment[] = []): Promise<boolean> {
   const { data } = await db().from("email_outbox").insert({ to_email: to, subject, html }).select("id").single();
   const id = (data as { id: string } | null)?.id;
   const t = mailer();
   if (!t) {
     console.log(`[email not sent: Gmail not configured] to=${to} subject="${subject}"`);
-    return;
+    return true;
   }
   try {
-    await t.sendMail({
-      from: `"${process.env.MAIL_FROM_NAME ?? "Meska AI"}" <${process.env.GMAIL_USER}>`,
-      to,
-      subject,
-      html,
-      attachments: [
-        ...(html.includes("cid:meska-logo")
-          ? [{ filename: "meska-logo.png", content: Buffer.from(EMAIL_LOGO_PNG_BASE64, "base64"), contentType: "image/png", cid: "meska-logo" }]
-          : []),
-        ...extra,
-      ],
-    });
+    await deliver(t, to, subject, html, extra);
     if (id) await db().from("email_outbox").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", id);
+    return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[email failed]", msg);
-    if (id) await db().from("email_outbox").update({ status: "failed", error: msg }).eq("id", id);
+    if (id) await db().from("email_outbox").update({ status: "failed", error: `[attempt 1] ${msg}` }).eq("id", id);
+    return false;
   }
+}
+
+function deliver(t: NonNullable<ReturnType<typeof mailer>>, to: string, subject: string, html: string, extra: Attachment[] = []) {
+  return t.sendMail({
+    from: `"${process.env.MAIL_FROM_NAME ?? "Meska AI"}" <${process.env.GMAIL_USER}>`,
+    to,
+    subject,
+    html,
+    attachments: [
+      ...(html.includes("cid:meska-logo")
+        ? [{ filename: "meska-logo.png", content: Buffer.from(EMAIL_LOGO_PNG_BASE64, "base64"), contentType: "image/png", cid: "meska-logo" }]
+        : []),
+      ...extra,
+    ],
+  });
+}
+
+// Re-sends emails Gmail rejected in the last 2 days, up to 3 attempts each (run by the scheduled jobs).
+// Only the message is retried: bell notifications were created once and aren't repeated.
+// Attachments (calendar invites) aren't stored, so a retried message goes without them; the trainer
+// can still add the training from its page.
+const MAX_ATTEMPTS = 3;
+export async function retryFailedEmails() {
+  const t = mailer();
+  if (!t) return 0;
+  const since = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const { data } = await db().from("email_outbox").select("id, to_email, subject, html, error").eq("status", "failed").gte("created_at", since).limit(50);
+  let sent = 0;
+  for (const row of (data ?? []) as { id: string; to_email: string; subject: string; html: string; error: string | null }[]) {
+    const attempt = Number(row.error?.match(/^\[attempt (\d+)\]/)?.[1] ?? 1);
+    if (attempt >= MAX_ATTEMPTS) continue;
+    // claim it so an overlapping run doesn't send it too
+    const { data: claimed } = await db().from("email_outbox").update({ status: "retrying" }).eq("id", row.id).eq("status", "failed").select("id");
+    if (!claimed?.length) continue;
+    try {
+      await deliver(t, row.to_email, row.subject, row.html);
+      await db().from("email_outbox").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", row.id);
+      sent++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await db().from("email_outbox").update({ status: "failed", error: `[attempt ${attempt + 1}] ${msg}` }).eq("id", row.id);
+    }
+  }
+  return sent;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);

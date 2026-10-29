@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { createContext, startTransition, useActionState, useContext, useRef, type FormEvent, type ReactNode } from "react";
 
 export type ActionResult = { error?: string; ok?: string } | void | undefined;
@@ -20,10 +21,17 @@ export function Form({
   reset?: boolean;
 }) {
   const ref = useRef<HTMLFormElement>(null);
-  const [state, run, pending] = useActionState(async (_: ActionResult, fd: FormData) => {
-    const r = (await action(fd)) ?? { ok: undefined };
-    if (reset && !r.error) ref.current?.reset();
-    return r;
+  const [state, run, pending] = useActionState(async (_: ActionResult, fd: FormData): Promise<ActionResult> => {
+    try {
+      const r = (await action(fd)) ?? { ok: undefined };
+      if (reset && !r.error) ref.current?.reset();
+      return r;
+    } catch (e) {
+      // redirect()/notFound() from the action must still do their job
+      unstable_rethrow(e);
+      console.error(e);
+      return { error: "Something went wrong. Check your connection and try again." };
+    }
   }, undefined);
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

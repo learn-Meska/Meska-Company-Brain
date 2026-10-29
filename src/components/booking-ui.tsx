@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { createBriefUpload, createMaterialUpload, materialLink, recordBriefFile, recordMaterial, respondBooking, submitBrief } from "@/app/(app)/bookings/actions";
 
+const OFFLINE = { error: "That didn't go through. Check your connection and try again." };
+
 function Msg({ m }: { m: { error?: string; ok?: string } | null }) {
   if (!m) return null;
   return m.error ? <p className="mt-2 rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{m.error}</p> : m.ok ? <p className="mt-2 rounded-xl bg-good-bg px-3 py-2 text-sm text-good">{m.ok}</p> : null;
@@ -18,7 +20,7 @@ export function RespondBox({ id }: { id: string }) {
   const [pending, start] = useTransition();
   const go = (accept: boolean) =>
     start(async () => {
-      const r = await respondBooking(id, accept, comment);
+      const r = await respondBooking(id, accept, comment).catch(() => OFFLINE);
       setM(r);
       // a declined training is no longer theirs, so go back to the list
       if (!r.error) {
@@ -59,19 +61,25 @@ export function MaterialUploader({ bookingId }: { bookingId: string }) {
     setBusy(true);
     setM(null);
     const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!);
-    for (const file of Array.from(files)) {
-      const u = await createMaterialUpload(bookingId, file.name);
-      if ("error" in u && u.error) {
-        setM({ error: u.error });
-        break;
+    try {
+      for (const file of Array.from(files)) {
+        const u = await createMaterialUpload(bookingId, file.name);
+        if ("error" in u && u.error) {
+          setM({ error: u.error });
+          break;
+        }
+        const { path, token } = u as { path: string; token: string };
+        const { error } = await sb.storage.from("materials").uploadToSignedUrl(path, token, file);
+        if (error) {
+          setM({ error: `${file.name}: ${error.message}` });
+          break;
+        }
+        const r = await recordMaterial(bookingId, path, file.name, file.size);
+        setM(r);
+        if (r.error) break;
       }
-      const { path, token } = u as { path: string; token: string };
-      const { error } = await sb.storage.from("materials").uploadToSignedUrl(path, token, file);
-      if (error) {
-        setM({ error: `${file.name}: ${error.message}` });
-        break;
-      }
-      setM(await recordMaterial(bookingId, path, file.name, file.size));
+    } catch {
+      setM(OFFLINE);
     }
     setBusy(false);
     if (input.current) input.current.value = "";
@@ -94,7 +102,8 @@ export function DownloadButton({ id, name }: { id: string; name: string }) {
     <button
       className="text-left text-sm font-medium text-blue hover:underline"
       onClick={async () => {
-        const r = await materialLink(id);
+        setErr("");
+        const r = await materialLink(id).catch(() => OFFLINE);
         if ("url" in r && r.url) window.location.href = r.url;
         else setErr(r.error ?? "Couldn't download.");
       }}
@@ -117,19 +126,25 @@ export function BriefBox({ bookingId, initial, submittedAt, finished }: { bookin
     setBusy(true);
     setM(null);
     const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!);
-    for (const file of Array.from(files)) {
-      const u = await createBriefUpload(bookingId, file.name);
-      if ("error" in u && u.error) {
-        setM({ error: u.error });
-        break;
+    try {
+      for (const file of Array.from(files)) {
+        const u = await createBriefUpload(bookingId, file.name);
+        if ("error" in u && u.error) {
+          setM({ error: u.error });
+          break;
+        }
+        const { path, token } = u as { path: string; token: string };
+        const { error } = await sb.storage.from("materials").uploadToSignedUrl(path, token, file);
+        if (error) {
+          setM({ error: `${file.name}: ${error.message}` });
+          break;
+        }
+        const r = await recordBriefFile(bookingId, path, file.name, file.size);
+        setM(r);
+        if (r.error) break;
       }
-      const { path, token } = u as { path: string; token: string };
-      const { error } = await sb.storage.from("materials").uploadToSignedUrl(path, token, file);
-      if (error) {
-        setM({ error: `${file.name}: ${error.message}` });
-        break;
-      }
-      setM(await recordBriefFile(bookingId, path, file.name, file.size));
+    } catch {
+      setM(OFFLINE);
     }
     setBusy(false);
     if (input.current) input.current.value = "";
@@ -147,7 +162,7 @@ export function BriefBox({ bookingId, initial, submittedAt, finished }: { bookin
           disabled={pending || busy}
           onClick={() =>
             start(async () => {
-              const r = await submitBrief(bookingId, text);
+              const r = await submitBrief(bookingId, text).catch(() => OFFLINE);
               setM(r);
               if (!r.error) router.refresh();
             })
@@ -159,7 +174,7 @@ export function BriefBox({ bookingId, initial, submittedAt, finished }: { bookin
           {busy ? "Uploading…" : "+ Attach document"}
           <input ref={input} type="file" multiple className="hidden" disabled={busy} onChange={(e) => attach(e.target.files)} />
         </label>
-        {submittedAt && <span className="text-xs text-muted">Last sent {new Date(submittedAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</span>}
+        {submittedAt && <span className="text-xs text-muted">Last sent {new Date(submittedAt).toLocaleString("en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</span>}
       </div>
       <Msg m={m} />
     </div>

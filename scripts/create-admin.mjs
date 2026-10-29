@@ -17,8 +17,10 @@ if (error) {
   id = data.users.find((u) => u.email?.toLowerCase() === email)?.id;
   if (!id) throw error;
 }
-const { error: e2 } = await sb.from("app_users").upsert({ id, email, full_name: name, role: "admin", can_manage_trainers: true });
+const { error: e2 } = await sb.from("app_users").upsert({ id, email, full_name: name, role: "admin", roles: ["admin"], can_manage_trainers: true });
 if (e2) throw e2;
+// an admin removed earlier was blocked from signing in
+await sb.auth.admin.updateUserById(id, { ban_duration: "none" });
 const site = (process.env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const { data: link, error: e3 } = await sb.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: `${site}/auth/set-password` } });
 if (e3) throw e3;

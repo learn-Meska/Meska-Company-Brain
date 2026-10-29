@@ -24,7 +24,7 @@ export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   if (!data?.claims && !PUBLIC.some((p) => path.startsWith(p))) {
     const login = new URL("/login", request.url);
-    if (path !== "/") login.searchParams.set("next", path);
+    if (path !== "/") login.searchParams.set("next", path + request.nextUrl.search);
     return NextResponse.redirect(login);
   }
   return response;

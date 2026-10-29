@@ -30,7 +30,9 @@ export function Bell() {
   }, []);
   const unread = items.filter((i) => !i.read_at).length;
   async function markAll() {
-    await fetch("/api/notifications", { method: "POST" });
+    try {
+      await fetch("/api/notifications", { method: "POST" });
+    } catch {}
     load();
   }
   return (

@@ -25,6 +25,14 @@ export const mainRole = (roles: string[]): Role => ROLE_ORDER.find((r) => roles.
 
 export const VIEW_COOKIE = "view_as";
 
+// Removing a team member blocks their sign-in (see removeTeamMember); a trainer whose profile was
+// deleted is not blocked and still sees the "no profile" page.
+async function removedMember(uid: string) {
+  const { data } = await db().auth.admin.getUserById(uid);
+  const until = (data?.user as { banned_until?: string | null } | undefined)?.banned_until;
+  return !!until && new Date(until).getTime() > Date.now();
+}
+
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const supabase = await authClient();
   const { data } = await supabase.auth.getClaims();
@@ -35,6 +43,8 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const { data: t } = await db().from("trainers").select("id").eq("user_id", uid).maybeSingle();
   const base = u as Omit<CurrentUser, "trainer_id" | "real_role" | "views"> & { roles: Role[] | null };
   const trainerId = (t as { id: string } | null)?.id ?? null;
+  // Removed from the team and not a trainer: no access, even while an old session is still valid.
+  if (base.role === "trainer" && !(base.roles ?? []).length && !trainerId && (await removedMember(uid))) return null;
   const views: Role[] =
     base.role === "admin" ? [...ROLE_ORDER] : ROLE_ORDER.filter((r) => (base.roles ?? []).includes(r) || r === base.role || (r === "trainer" && trainerId));
   const view = (await cookies()).get(VIEW_COOKIE)?.value as Role | undefined;
@@ -49,6 +59,16 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     trainer_id: trainerId,
   };
 });
+
+// True when this session was started from an invite or reset email within the last hour. Only then
+// can a password be set without the current one; otherwise an unattended open session could be taken over.
+const LINK_METHODS = ["otp", "recovery", "invite", "magiclink", "email/signup", "email_change"];
+export async function signedInFromEmailLink() {
+  const { data } = await (await authClient()).auth.getClaims();
+  const amr = (data?.claims?.amr ?? []) as ({ method: string; timestamp: number } | string)[];
+  const freshAfter = Date.now() / 1000 - 3600;
+  return amr.some((a) => (typeof a === "string" ? LINK_METHODS.includes(a) : LINK_METHODS.includes(a.method) && a.timestamp >= freshAfter));
+}
 
 export async function requireUser(): Promise<CurrentUser> {
   const u = await getCurrentUser();

@@ -11,7 +11,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext<"/bookings/[id]/q
   const { id } = await ctx.params;
   const { data } = await db().from("bookings").select("trainer_id, status, feedback_token, program_name, day_number, date, start_time").eq("id", id).maybeSingle();
   const b = data as { trainer_id: string; status: string; feedback_token: string; program_name: string; day_number: number; date: string; start_time: string } | null;
-  const allowed = u && b && (u.role === "admin" || u.role === "approver" || u.trainer_id === b.trainer_id);
+  const allowed = u && b && (u.role === "admin" || u.role === "approver" || (!!u.trainer_id && u.trainer_id === b.trainer_id));
   if (!allowed || b.status !== "confirmed") return new NextResponse("Not found", { status: 404 });
   const png = await QRCode.toBuffer(`${siteUrl()}/f/${b.feedback_token}`, { type: "png", width: 1024, margin: 2, errorCorrectionLevel: "M", color: { dark: "#0B1E3A", light: "#FFFFFF" } });
   const showProgram = u.role !== "trainer" || u.trainer_id !== b.trainer_id || programVisible(b);

@@ -1,12 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { db } from "@/lib/supabase";
+import { db, fetchAll } from "@/lib/supabase";
 import { AUDIT_LABEL, todayISO } from "@/lib/format";
 
 type Log = { action: string; details: Record<string, unknown> | null; created_at: string; app_users: { full_name: string; email: string } | null };
 
+// Text typed by users (reasons, comments, names) must not run as a formula when opened in Excel/Sheets.
 const cell = (v: unknown) => {
-  const s = v == null ? "" : String(v);
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
@@ -15,9 +17,12 @@ export async function GET(req: NextRequest) {
   const u = await getCurrentUser();
   if (!u || u.role !== "admin") return new NextResponse("Not found", { status: 404 });
   const only = req.nextUrl.searchParams.get("only");
-  let q = db().from("audit_log").select("action, details, created_at, app_users(full_name, email)").order("created_at", { ascending: false }).limit(10000);
-  if (only === "cancellations") q = q.eq("action", "booking_cancelled");
-  const { data } = await q;
+  const { data, error } = await fetchAll((from, to) => {
+    let q = db().from("audit_log").select("action, details, created_at, app_users(full_name, email)").order("created_at", { ascending: false }).order("id");
+    if (only === "cancellations") q = q.eq("action", "booking_cancelled");
+    return q.range(from, to);
+  });
+  if (error) return new NextResponse("The log couldn't be exported. Please try again.", { status: 500 });
 
   const header = ["Date", "Time (Cairo)", "Who", "Email", "Action", "Training", "Reason", "Changes", "Comment", "Short notice"];
   const rows = ((data ?? []) as unknown as Log[]).map((l) => {

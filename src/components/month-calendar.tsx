@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { fmtTime, todayISO } from "@/lib/format";
+import { fmtTime, isMonth, todayISO } from "@/lib/format";
 import type { BookingRow } from "@/lib/notify";
 
 export const NOTE: Record<string, string> = {
@@ -11,7 +11,7 @@ export const NOTE: Record<string, string> = {
 };
 
 export function monthGrid(m: unknown) {
-  const month = typeof m === "string" && /^\d{4}-\d{2}$/.test(m) ? m : todayISO().slice(0, 7);
+  const month = isMonth(m) ? m : todayISO().slice(0, 7);
   const [y, mm] = month.split("-").map(Number);
   const first = new Date(Date.UTC(y, mm - 1, 1));
   const lead = first.getUTCDay();

@@ -3,7 +3,7 @@ import { AvailabilityEditor } from "@/components/availability-editor";
 import { requireTrainer } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { getSetting } from "@/lib/scoring";
-import { programVisible, todayISO } from "@/lib/format";
+import { deadlineDay, isMonth, ordinal, programVisible, todayISO } from "@/lib/format";
 
 export default async function MyAvailabilityPage({ searchParams }: PageProps<"/me/availability">) {
   const me = await requireTrainer();
@@ -11,7 +11,8 @@ export default async function MyAvailabilityPage({ searchParams }: PageProps<"/m
   const { m } = await searchParams;
   const today = todayISO();
   const nextMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 1)).toISOString().slice(0, 7);
-  const month = typeof m === "string" && /^\d{4}-\d{2}$/.test(m) ? m : nextMonth;
+  // Past months can't be edited, so they aren't offered either.
+  const month = isMonth(m) && m >= today.slice(0, 7) ? m : nextMonth;
   const [y, mm] = month.split("-").map(Number);
   const start = `${month}-01`;
   const end = new Date(Date.UTC(y, mm, 0)).toISOString().slice(0, 10);
@@ -21,14 +22,15 @@ export default async function MyAvailabilityPage({ searchParams }: PageProps<"/m
     db().from("availability_months").select("submitted_at").eq("trainer_id", me.trainer_id).eq("month", start).maybeSingle(),
     getSetting("availability_deadline", { day_of_month: 25 }),
   ]);
-  const booked = ((locks ?? []) as unknown as { date: string; slot: "morning" | "evening"; bookings: { program_name: string; day_number: number; date: string; start_time: string } }[]).map((l) => ({
+  const booked = ((locks ?? []) as unknown as { date: string; slot: "morning" | "evening"; bookings: { program_name: string; day_number: number; date: string; start_time: string } | null }[]).map((l) => ({
     date: l.date,
     slot: l.slot,
-    label: programVisible(l.bookings) ? `${l.bookings.program_name} D${l.bookings.day_number}` : `Training D${l.bookings.day_number}`,
+    // a lock is still a booked slot even if its booking row can't be read
+    label: !l.bookings ? "Booked" : programVisible(l.bookings) ? `${l.bookings.program_name} D${l.bookings.day_number}` : `Training D${l.bookings.day_number}`,
   }));
   return (
     <div className="space-y-5">
-      <PageHeader kicker="Availability" title={<>My availability</>} lead={<>Tap a slot to mark yourself available. Please confirm each month by the {deadline.day_of_month}th of the month before. Booked slots are locked;
+      <PageHeader kicker="Availability" title={<>My availability</>} lead={<>Tap a slot to mark yourself available. Please confirm each month by the {ordinal(deadlineDay(deadline.day_of_month))} of the month before. Booked slots are locked;
           you can change anything else.</>} />
       <div className="card">
         <AvailabilityEditor

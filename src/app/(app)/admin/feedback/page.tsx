@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { Form, Submit } from "@/components/form";
 import { requireRole } from "@/lib/auth";
-import { db } from "@/lib/supabase";
+import { db, fetchAll } from "@/lib/supabase";
 import { fmtDate } from "@/lib/format";
 import { importFeedback } from "../actions";
 
@@ -9,7 +9,7 @@ type F = { id: string; trainer_name: string; client: string | null; program: str
 
 export default async function FeedbackPage() {
   await requireRole("admin");
-  const { data } = await db().from("feedback_sessions").select("*").order("session_date", { ascending: false });
+  const { data } = await fetchAll((from, to) => db().from("feedback_sessions").select("*").order("session_date", { ascending: false }).order("id").range(from, to));
   const rows = (data ?? []) as F[];
   return (
     <div className="space-y-6">

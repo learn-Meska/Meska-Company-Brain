@@ -43,24 +43,33 @@ export function AssignPanel({ bookingId, samePref }: { bookingId: string; samePr
   const [pick, setPick] = useState<Record<string, string>>({});
   const [pending, start] = useTransition();
 
+  // `version` re-runs the search after an assignment, so days already handled drop out of the list.
+  const [version, setVersion] = useState(0);
   useEffect(() => {
     let live = true;
-    requestCandidates(bookingId).then((r) => {
-      if (!live) return;
-      if ("error" in r && r.error) setErr(r.error);
-      else setData(r as { days: Day[]; common: Cand[] });
-    });
+    requestCandidates(bookingId)
+      .then((r) => {
+        if (!live) return;
+        if ("error" in r && r.error) setErr(r.error);
+        else setData(r as { days: Day[]; common: Cand[] });
+      })
+      .catch(() => live && setErr("Couldn't load the free trainers. Refresh the page to try again."));
     return () => {
       live = false;
     };
-  }, [bookingId]);
+  }, [bookingId, version]);
 
   function go(assignments: { bookingId: string; trainerId: string }[]) {
     setMsg(null);
     start(async () => {
-      const r = await assignTrainer(assignments);
+      const r = await assignTrainer(assignments).catch(() => ({ error: "That didn't go through. Check your connection and try again." }));
       setMsg(r);
-      if (!r.error) router.refresh();
+      if (!r.error) {
+        setPick({});
+        setAll("");
+        setVersion((v) => v + 1);
+        router.refresh();
+      }
     });
   }
 

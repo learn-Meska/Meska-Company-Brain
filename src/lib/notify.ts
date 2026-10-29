@@ -24,12 +24,13 @@ export async function userById(id: string | null | undefined): Promise<Recipient
 }
 
 // In-app bell notification plus (optionally) an email to each recipient.
+// Resolves to false when there was nobody to reach or an email failed to send.
 export async function notify(
   recipients: (Recipient | null | undefined)[],
   n: { title: string; body?: string; link?: string; email?: { subject: string; intro: string; rows?: EmailRow[]; content?: string; extra?: string; button?: string; attachments?: Attachment[] } },
 ) {
   const unique = [...new Map(recipients.filter((r): r is Recipient => !!r).map((r) => [r.id || r.email, r])).values()];
-  if (!unique.length) return;
+  if (!unique.length) return false;
   // Trainers who haven't accepted their invite yet have no account, so they only get the email.
   const inApp = unique.filter((r) => r.id);
   if (inApp.length) {
@@ -39,7 +40,7 @@ export async function notify(
   }
   if (n.email) {
     const e = n.email;
-    await Promise.all(
+    const sent = await Promise.all(
       unique.map((r) =>
         sendEmail(
           r.email,
@@ -56,7 +57,9 @@ export async function notify(
         ),
       ),
     );
+    return sent.every(Boolean);
   }
+  return true;
 }
 
 export async function audit(actorId: string | null, action: string, bookingId: string | null, details?: unknown) {

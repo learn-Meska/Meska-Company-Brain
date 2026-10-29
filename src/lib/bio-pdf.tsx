@@ -3,6 +3,7 @@ import "server-only";
 import path from "path";
 import { Circle, Defs, Document, Font, Image, type Styles, LinearGradient, Line, Page, Path, Rect, Stop, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import type { TrainerProfile } from "./scoring";
+import { pdfText } from "./pdf-text";
 
 // Layout follows the approved "Meska Trainer Bio" one-pager: navy header with photo,
 // left column (overview, credentials), right column (footprint, expertise, thought leadership).
@@ -44,7 +45,7 @@ function Rich({ text, style }: { text: string; style: Style }) {
   return (
     <Text style={style}>
       {parts.map((p, i) =>
-        p.startsWith("**") ? (
+        /^\*\*[^*]+\*\*$/.test(p) ? (
           <Text key={i} style={{ fontWeight: 700, color: INK }}>{p.slice(2, -2)}</Text>
         ) : (
           p
@@ -123,18 +124,19 @@ function GroupList({ items, size = 9.6 }: { items: Group[]; size?: number }) {
   );
 }
 
+// Long names shrink so they stay on one line inside the header band.
+const nameSize = (name: string) => (name.length > 30 ? Math.max(20, Math.round((33 * 30) / name.length)) : 33);
+
 export type BioInput = { t: TrainerProfile; photo: Buffer | null };
 
 function BioDoc({ t, photo }: BioInput) {
-  const overview = t.overview ? t.overview.split(/\r?\n\s*\r?\n/).map((p) => p.replace(/\s*\r?\n\s*/g, " ").trim()) : [];
+  const overview = t.overview ? t.overview.split(/\r?\n\s*\r?\n/).map((p) => p.replace(/\s*\r?\n\s*/g, " ").trim()).filter(Boolean) : [];
   if (!overview.length) {
     const tags = (k: string) => t.lookups.filter((l) => l.kind === k).map((l) => l.name);
-    overview.push(
-      `Meska AI trainer specialised in **${t.skills.map((s) => s.name).join(", ") || "AI for business"}**.`,
-      [tags("audience").length && `Delivers to ${tags("audience").join(", ")} audiences`, tags("function").length && `across ${tags("function").join(", ")} functions`]
-        .filter(Boolean)
-        .join(" ") + ".",
-    );
+    overview.push(`Meska AI trainer specialised in **${t.skills.map((s) => s.name).join(", ") || "AI for business"}**.`);
+    // only when there is something to say, otherwise the paragraph would be a lone "."
+    const reach = [tags("audience").length && `Delivers to ${tags("audience").join(", ")} audiences`, tags("function").length && `across ${tags("function").join(", ")} functions`].filter(Boolean);
+    if (reach.length) overview.push(reach.join(" ") + ".");
   }
   const credentials = lines(t.credentials);
   const footprint = groups(t.footprint);
@@ -174,7 +176,7 @@ function BioDoc({ t, photo }: BioInput) {
             )}
           </View>
           <View style={{ position: "absolute", left: 210, top: 22, right: 40 }}>
-            <Text style={{ fontFamily: "Merriweather", fontWeight: 700, fontSize: 33, color: "#FFFFFF" }}>{t.full_name}</Text>
+            <Text style={{ fontFamily: "Merriweather", fontWeight: 700, fontSize: nameSize(t.full_name), color: "#FFFFFF" }}>{t.full_name}</Text>
             {t.title ? <Text style={{ fontFamily: "DM Sans", fontWeight: 700, fontSize: 15, color: "#FFFFFF", marginTop: 8 }}>{t.title}</Text> : null}
             {t.email ? <Text style={{ fontFamily: "DM Sans", fontSize: 11.5, color: "#93C5FD", marginTop: 6 }}>{t.email}</Text> : null}
           </View>
@@ -229,5 +231,23 @@ function BioDoc({ t, photo }: BioInput) {
 }
 
 export function renderBioPdf(input: BioInput) {
-  return renderToBuffer(<BioDoc {...input} />);
+  const t = input.t;
+  const clean = (s: string | null) => (s == null ? s : pdfText(s));
+  // every piece of profile text the PDF prints goes through the font-coverage filter
+  const safe: TrainerProfile = {
+    ...t,
+    full_name: pdfText(t.full_name).trim() || "Meska trainer",
+    title: clean(t.title),
+    email: clean(t.email),
+    phone: clean(t.phone),
+    overview: clean(t.overview),
+    credentials: clean(t.credentials),
+    footprint_intro: clean(t.footprint_intro),
+    footprint: clean(t.footprint),
+    expertise: clean(t.expertise),
+    thought_leadership: clean(t.thought_leadership),
+    skills: t.skills.map((s) => ({ ...s, name: pdfText(s.name) })),
+    lookups: t.lookups.map((l) => ({ ...l, name: pdfText(l.name) })),
+  };
+  return renderToBuffer(<BioDoc {...input} t={safe} />);
 }

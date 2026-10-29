@@ -6,7 +6,7 @@ import { requireRole, requireTrainer, requireUser } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { esc, siteUrl } from "@/lib/email";
 import { trainingIcs } from "@/lib/ics";
-import { cairoStart, fmtDate, fmtTime, friendlyError, programVisible, slotsFor, trainerTitle } from "@/lib/format";
+import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, programVisible, slotsFor, todayISO, trainerTitle } from "@/lib/format";
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
 import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, userWithRole, type BookingRow } from "@/lib/notify";
@@ -15,9 +15,23 @@ const TIME = /^\d{2}:\d{2}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 async function loadBookings(ids: string[]) {
-  const { data } = await db().from("bookings").select(BOOKING_SELECT).in("id", ids);
+  const valid = ids.filter(isUuid);
+  if (!valid.length) return [];
+  const { data } = await db().from("bookings").select(BOOKING_SELECT).in("id", valid);
   return (data ?? []) as BookingRow[];
 }
+
+const ACTIVE = ["needs_trainer", "pending_approval", "awaiting_trainer", "confirmed"];
+
+// Training materials and briefs: documents, slides, sheets, images, audio/video and archives.
+// Anything that a browser or OS would run (html, svg, exe, scripts…) is refused.
+const FILE_TYPES = /\.(pdf|docx?|pptx?|xlsx?|csv|txt|md|rtf|odt|odp|ods|key|pages|numbers|png|jpe?g|gif|webp|heic|mp4|mov|m4v|webm|mp3|m4a|wav|zip)$/i;
+const safeName = (fileName: string) => String(fileName).replace(/[^\w.\- ]+/g, "_").replace(/^\.+/, "").slice(-120) || "file";
+function checkFile(fileName: string) {
+  if (typeof fileName !== "string" || !FILE_TYPES.test(fileName.trim())) return "That file type isn't allowed. Upload documents, slides, sheets, images, audio/video or a .zip.";
+  return null;
+}
+const PAST_DATE = "Trainings can't be scheduled on a date that has already passed.";
 
 function refresh() {
   for (const p of ["/bookings", "/calendar", "/me", "/me/bookings", "/me/availability"]) revalidatePath(p);
@@ -72,10 +86,14 @@ export type NewRequest = {
 export async function createRequest(input: NewRequest) {
   const me = await requireRole("growth", "admin", "approver");
   if (!input.program_name.trim()) return { error: "Enter the program name." };
-  if (!input.audience_id || !input.function_id || !input.industry_id) return { error: "Pick the audience level, function and industry." };
+  if (![input.audience_id, input.function_id, input.industry_id].every(isUuid)) return { error: "Pick the audience level, function and industry." };
   if (!input.days.length) return { error: "Add at least one training day." };
+  const today = todayISO();
   for (const d of input.days) {
+    if (!Number.isInteger(d.day_number) || d.day_number < 1) return { error: "Each day needs a day number of 1 or more." };
     if (!DATE.test(d.date)) return { error: `Pick a date for Day ${d.day_number}.` };
+    if (d.date < today) return { error: `Day ${d.day_number}: ${PAST_DATE}` };
+    if (!Array.isArray(d.skill_ids) || !d.skill_ids.every(isUuid)) return { error: `Day ${d.day_number}: pick the skills again.` };
     if (!TIME.test(d.start) || !TIME.test(d.end) || d.end <= d.start) return { error: `Check the time for Day ${d.day_number}.` };
     if (!slotsFor(d.start, d.end).length) return { error: `Day ${d.day_number}: the time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM).` };
     if (!d.content.trim()) return { error: `Describe the content for Day ${d.day_number}.` };
@@ -105,7 +123,13 @@ export async function createRequest(input: NewRequest) {
     )
     .select("id");
   if (error) return { error: friendlyError(error.message) };
-  const rows = (await loadBookings(((data ?? []) as { id: string }[]).map((r) => r.id))).sort((a, b) => a.day_number - b.day_number);
+  const ids = ((data ?? []) as { id: string }[]).map((r) => r.id);
+  const rows = (await loadBookings(ids)).sort((a, b) => a.day_number - b.day_number);
+  // The request is saved; if it can't be re-read, don't report a failure (that would invite a duplicate).
+  if (!rows.length) {
+    refresh();
+    return { ok: "Request sent. It's on the calendar.", ids };
+  }
   for (const b of rows) await audit(me.id, "training_requested", b.id, { program: title(b) });
   await notify(await usersWithRoles("admin", "approver"), {
     title: `Trainer needed: ${input.program_name}${rows.length > 1 ? ` (${rows.length} days)` : ""}`,
@@ -161,11 +185,16 @@ async function loadBatch(batchId: string) {
 export async function assignTrainer(assignments: { bookingId: string; trainerId: string }[]) {
   const me = await requireRole("admin", "approver");
   if (!assignments.length) return { error: "Choose a trainer." };
+  if (!assignments.every((a) => isUuid(a.bookingId) && isUuid(a.trainerId))) return { error: "Choose a trainer." };
+  if (new Set(assignments.map((a) => a.bookingId)).size !== assignments.length) return { error: "Each day can only get one trainer." };
+  const targets = await loadBookings(assignments.map((a) => a.bookingId));
+  if (targets.some((b) => b.date < todayISO())) return { error: PAST_DATE + " Change the date first." };
   const done: string[] = [];
   for (const a of assignments) {
+    // A fresh assignment starts clean: no reminder sent yet and no comment from a previous trainer.
     const { data, error } = await db()
       .from("bookings")
-      .update({ trainer_id: a.trainerId, status: "awaiting_trainer", approver_id: me.id, decided_at: new Date().toISOString() })
+      .update({ trainer_id: a.trainerId, status: "awaiting_trainer", approver_id: me.id, decided_at: new Date().toISOString(), reminder_sent_at: null, trainer_comment: null, trainer_responded_at: null })
       .eq("id", a.bookingId)
       .eq("status", "needs_trainer")
       .select("id");
@@ -218,16 +247,22 @@ export async function respondBooking(id: string, accept: boolean, comment: strin
   if (!b || b.trainer_id !== me.trainer_id) return { error: "Booking not found." };
   if (b.status !== "awaiting_trainer") return { error: "This booking no longer needs a response." };
   if (!accept && !comment.trim()) return { error: "Please tell us why you can't take it." };
+  if (comment.length > 2000) return { error: "Please keep the comment under 2,000 characters." };
   // A decline puts the training back to "Needs a trainer" so the booking team can reassign it.
-  const { error } = await db()
+  // The status/trainer guard makes a second click, or a cancellation in between, a no-op.
+  const { data: changed, error } = await db()
     .from("bookings")
     .update(
       accept
         ? { status: "confirmed", trainer_comment: comment.trim() || null, trainer_responded_at: new Date().toISOString() }
-        : { status: "needs_trainer", trainer_id: null, approver_id: null, decided_at: null, trainer_comment: `${me.full_name} declined: ${comment.trim()}`, trainer_responded_at: new Date().toISOString() },
+        : { status: "needs_trainer", trainer_id: null, approver_id: null, decided_at: null, reminder_sent_at: null, trainer_comment: `${me.full_name} declined: ${comment.trim()}`, trainer_responded_at: new Date().toISOString() },
     )
-    .eq("id", id);
+    .eq("id", id)
+    .eq("status", "awaiting_trainer")
+    .eq("trainer_id", me.trainer_id)
+    .select("id");
   if (error) return { error: friendlyError(error.message) };
+  if (!changed?.length) return { error: "This booking no longer needs a response." };
   await audit(me.id, accept ? "booking_confirmed" : "booking_declined", id, { comment, program: title(b) });
   // The Growth member who requested the training is emailed when the trainer confirms.
   const requester = accept ? await userWithRole(b.created_by, "growth") : null;
@@ -282,7 +317,7 @@ export async function editBooking(fd: FormData) {
   const id = String(fd.get("id"));
   const [b] = await loadBookings([id]);
   if (!b || !mayChange(me, b)) return { error: "Booking not found." };
-  if (!["needs_trainer", "pending_approval", "awaiting_trainer", "confirmed"].includes(b.status)) return { error: "Only active bookings can be edited." };
+  if (!ACTIVE.includes(b.status)) return { error: "Only active bookings can be edited." };
   const next = {
     program_name: String(fd.get("program_name") ?? "").trim(),
     day_number: Number(fd.get("day_number")),
@@ -293,7 +328,10 @@ export async function editBooking(fd: FormData) {
     content: String(fd.get("content") ?? "").replace(/\r\n/g, "\n").trim(),
   };
   if (!next.program_name || !next.content) return { error: "Program name and content can't be empty." };
+  if (!Number.isInteger(next.day_number) || next.day_number < 1) return { error: "The day number must be 1 or more." };
   if (!DATE.test(next.date) || !TIME.test(next.start_time) || !TIME.test(next.end_time) || next.end_time <= next.start_time) return { error: "Check the date and time." };
+  if (!slotsFor(next.start_time, next.end_time).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
+  if (next.date !== b.date && next.date < todayISO()) return { error: PAST_DATE };
 
   const fields: [string, string, string][] = [
     ["Program", b.program_name, next.program_name],
@@ -306,10 +344,15 @@ export async function editBooking(fd: FormData) {
   const changes = fields.filter(([, a, c]) => a !== c).map(([field, from, to]) => ({ field, from, to }));
   if (!changes.length) return { ok: "Nothing changed." };
 
-  const { error } = await db().from("bookings").update(next).eq("id", id);
+  // Only if nothing changed underneath (e.g. a trainer was assigned while Growth was editing).
+  let q = db().from("bookings").update(next).eq("id", id).eq("status", b.status);
+  q = b.trainer_id ? q.eq("trainer_id", b.trainer_id) : q.is("trainer_id", null);
+  const { data: saved, error } = await q.select("id");
   if (error) return { error: friendlyError(error.message) };
+  if (!saved?.length) return { error: "This booking changed while you were editing. Refresh the page and try again." };
   await audit(me.id, "booking_edited", id, { changes, program: title(b) });
   const [fresh] = await loadBookings([id]);
+  if (!fresh) return { ok: "Saved." };
 
   const summary = changes.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · ");
   const email = { subject: `Training updated: ${title(fresh)}`, intro: `<b>${esc(me.full_name)}</b> changed this training. Here's what's different:`, extra: changeTable(changes), rows: bookingRows(fresh) };
@@ -320,7 +363,14 @@ export async function editBooking(fd: FormData) {
       title: `Training updated: ${trainerTitle(fresh)}`,
       body: forTrainer.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · "),
       link: `/me/bookings/${id}`,
-      email: { subject: `Training updated — ${fmtDate(fresh.date, { weekday: "long", day: "numeric", month: "long" })}`, intro: email.intro, extra: changeTable(forTrainer), rows: bookingRows(fresh, true) },
+      email: {
+        subject: `Training updated — ${fmtDate(fresh.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        intro: email.intro,
+        extra: changeTable(forTrainer),
+        rows: bookingRows(fresh, true),
+        // the updated invite replaces the one they already added to their calendar
+        attachments: [{ filename: "meska-training.ics", content: trainingIcs(fresh, `${siteUrl()}/me/bookings/${id}`), contentType: "text/calendar; charset=utf-8; method=PUBLISH" }],
+      },
     });
   }
   await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), { title: `Training updated: ${title(fresh)}`, body: summary, link: `/bookings/${id}`, email });
@@ -337,15 +387,19 @@ export async function cancelBooking(fd: FormData) {
   const reason = String(fd.get("reason") ?? "").replace(/\r\n/g, "\n").trim();
   const [b] = await loadBookings([id]);
   if (!b || !mayChange(me, b)) return { error: "Booking not found." };
-  if (!["needs_trainer", "pending_approval", "awaiting_trainer", "confirmed"].includes(b.status)) return { error: "This booking is not active." };
+  if (!ACTIVE.includes(b.status)) return { error: "This booking is not active." };
   const rule = await getSetting("cancellation", { notice_hours: 48, min_reason_chars: 150 });
   const hoursLeft = (cairoStart(b.date, b.start_time).getTime() - Date.now()) / 3_600_000;
   const shortNotice = hoursLeft < rule.notice_hours;
   if (shortNotice && reason.length < rule.min_reason_chars)
     return { error: `This training starts in under ${rule.notice_hours} hours, so a detailed reason is required (at least ${rule.min_reason_chars} characters; you wrote ${reason.length}).` };
   if (!shortNotice && reason.length < 10) return { error: "Please add a short reason for the cancellation." };
-  const { error } = await db().from("bookings").update({ status: "cancelled", cancel_reason: reason, cancelled_by: me.id, cancelled_at: new Date().toISOString() }).eq("id", id);
+  // Guarded on the state that was checked, so a double submit or a concurrent assignment can't slip through.
+  let q = db().from("bookings").update({ status: "cancelled", cancel_reason: reason, cancelled_by: me.id, cancelled_at: new Date().toISOString() }).eq("id", id).eq("status", b.status);
+  q = b.trainer_id ? q.eq("trainer_id", b.trainer_id) : q.is("trainer_id", null);
+  const { data: cancelled, error } = await q.select("id");
   if (error) return { error: friendlyError(error.message) };
+  if (!cancelled?.length) return { error: "This booking changed in the meantime. Refresh the page and try again." };
   await audit(me.id, "booking_cancelled", id, { reason, short_notice: shortNotice, hours_before: Math.round(hoursLeft), program: title(b) });
   // The trainer only hears that it was cancelled; the reason goes to the admin and the log.
   if (b.trainer_id) {
@@ -353,7 +407,13 @@ export async function cancelBooking(fd: FormData) {
       title: `Training cancelled: ${trainerTitle(b)}`,
       body: when(b),
       link: `/me/bookings`,
-      email: { subject: `Training cancelled — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`, intro: "The following training has been cancelled. The slot is free again in your calendar.", rows: bookingRows({ ...b, status: "cancelled" }, true) },
+      email: {
+        subject: `Training cancelled — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        intro: "The following training has been cancelled. The slot is free again in your calendar.",
+        rows: bookingRows({ ...b, status: "cancelled" }, true),
+        // opening it removes the event from their calendar
+        attachments: [{ filename: "meska-training-cancelled.ics", content: trainingIcs(b, `${siteUrl()}/me/bookings`, true), contentType: "text/calendar; charset=utf-8; method=CANCEL" }],
+      },
     });
   }
   await notify(await usersWithRoles("admin"), {
@@ -370,7 +430,10 @@ export async function cancelBooking(fd: FormData) {
 
 export async function createMaterialUpload(bookingId: string, fileName: string) {
   await requireRole("admin");
-  const safe = fileName.replace(/[^\w.\- ]+/g, "_").slice(-120);
+  if (!(await loadBookings([bookingId])).length) return { error: "Booking not found." };
+  const bad = checkFile(fileName);
+  if (bad) return { error: bad };
+  const safe = safeName(fileName);
   const path = `${bookingId}/${Date.now()}-${safe}`;
   const { data, error } = await db().storage.from("materials").createSignedUploadUrl(path);
   if (error) return { error: error.message };
@@ -379,11 +442,14 @@ export async function createMaterialUpload(bookingId: string, fileName: string) 
 
 export async function recordMaterial(bookingId: string, path: string, fileName: string, size: number) {
   const me = await requireRole("admin");
-  if (!path.startsWith(bookingId + "/")) return { error: "Invalid upload." };
-  await db().from("booking_materials").insert({ booking_id: bookingId, file_path: path, file_name: fileName, size_bytes: size, uploaded_by: me.id });
   const [b] = await loadBookings([bookingId]);
+  if (!b) return { error: "Booking not found." };
+  if (!path.startsWith(bookingId + "/") || path.includes("..") || path.slice(bookingId.length + 1).startsWith("brief-")) return { error: "Invalid upload." };
+  if (checkFile(path)) return { error: "Invalid upload." };
+  const { error } = await db().from("booking_materials").insert({ booking_id: bookingId, file_path: path, file_name: fileName.slice(0, 200), size_bytes: Number.isFinite(size) ? size : null, uploaded_by: me.id });
+  if (error) return { error: friendlyError(error.message) };
   await audit(me.id, "material_uploaded", bookingId, { file: fileName, program: title(b) });
-  if (b && ["awaiting_trainer", "confirmed"].includes(b.status)) {
+  if (["awaiting_trainer", "confirmed"].includes(b.status)) {
     await notify([await trainerRecipient(b)], {
       title: `New material for ${trainerTitle(b)}`,
       body: fileName,
@@ -398,20 +464,28 @@ export async function recordMaterial(bookingId: string, path: string, fileName: 
 export async function deleteMaterial(fd: FormData) {
   await requireRole("admin");
   const id = String(fd.get("id"));
-  const { data } = await db().from("booking_materials").select("*").eq("id", id).single();
-  const m = data as { file_path: string; booking_id: string };
+  if (!isUuid(id)) return;
+  const { data } = await db().from("booking_materials").select("*").eq("id", id).maybeSingle();
+  const m = data as { file_path: string; booking_id: string } | null;
+  if (!m) return;
+  const { error } = await db().from("booking_materials").delete().eq("id", id);
+  if (error) throw new Error(friendlyError(error.message));
   await db().storage.from("materials").remove([m.file_path]);
-  await db().from("booking_materials").delete().eq("id", id);
   revalidatePath(`/bookings/${m.booking_id}`);
+  revalidatePath(`/me/bookings/${m.booking_id}`);
 }
 
 export async function materialLink(id: string) {
   const me = await requireUser();
-  const { data } = await db().from("booking_materials").select("file_path, file_name, bookings(trainer_id)").eq("id", id).single();
-  const m = data as unknown as { file_path: string; file_name: string; bookings: { trainer_id: string } };
+  if (!isUuid(id)) return { error: "File not found." };
+  const { data } = await db().from("booking_materials").select("file_path, file_name, bookings(trainer_id)").eq("id", id).maybeSingle();
+  const m = data as unknown as { file_path: string; file_name: string; bookings: { trainer_id: string | null } | null } | null;
   if (!m) return { error: "File not found." };
-  if (me.role === "trainer" && m.bookings.trainer_id !== me.trainer_id) return { error: "File not found." };
-  const { data: s, error } = await db().storage.from("materials").createSignedUrl(m.file_path, 300, { download: m.file_name });
+  if (me.role === "trainer" && (!me.trainer_id || m.bookings?.trainer_id !== me.trainer_id)) return { error: "File not found." };
+  // the saved name only if it is a plain, allowed name; otherwise the stored object's own name
+  // Keeps non-Latin names (e.g. Arabic) and drops only characters that are unsafe in a file name.
+  const name = checkFile(m.file_name) ? m.file_path.split("/").pop()! : m.file_name.replace(/[\x00-\x1f\x7f/\\:*?"<>|]+/g, "_").trim() || m.file_path.split("/").pop()!;
+  const { data: s, error } = await db().storage.from("materials").createSignedUrl(m.file_path, 300, { download: name });
   if (error) return { error: error.message };
   return { url: s.signedUrl };
 }
@@ -430,7 +504,9 @@ async function ownConfirmedPast(bookingId: string) {
 export async function createBriefUpload(bookingId: string, fileName: string) {
   const r = await ownConfirmedPast(bookingId);
   if ("error" in r) return { error: r.error };
-  const safe = fileName.replace(/[^\w.\- ]+/g, "_").slice(-120);
+  const bad = checkFile(fileName);
+  if (bad) return { error: bad };
+  const safe = safeName(fileName);
   const path = `${bookingId}/brief-${Date.now()}-${safe}`;
   const { data, error } = await db().storage.from("materials").createSignedUploadUrl(path);
   if (error) return { error: error.message };
@@ -440,8 +516,10 @@ export async function createBriefUpload(bookingId: string, fileName: string) {
 export async function recordBriefFile(bookingId: string, path: string, fileName: string, size: number) {
   const r = await ownConfirmedPast(bookingId);
   if ("error" in r) return { error: r.error };
-  if (!path.startsWith(`${bookingId}/brief-`)) return { error: "Invalid upload." };
-  await db().from("booking_materials").insert({ booking_id: bookingId, file_path: path, file_name: fileName, size_bytes: size, uploaded_by: r.me.id, kind: "brief" });
+  if (!path.startsWith(`${bookingId}/brief-`) || path.includes("..")) return { error: "Invalid upload." };
+  if (checkFile(path)) return { error: "Invalid upload." };
+  const { error } = await db().from("booking_materials").insert({ booking_id: bookingId, file_path: path, file_name: fileName.slice(0, 200), size_bytes: Number.isFinite(size) ? size : null, uploaded_by: r.me.id, kind: "brief" });
+  if (error) return { error: friendlyError(error.message) };
   revalidatePath(`/me/bookings/${bookingId}`);
   return { ok: `Attached ${fileName}.` };
 }
@@ -455,7 +533,8 @@ export async function submitBrief(bookingId: string, text: string) {
   const first = !r.b.finished_at;
   const now = new Date().toISOString();
   // Submitting the brief is what marks the training day as finished.
-  await db().from("bookings").update({ brief: brief || null, brief_submitted_at: now, finished_at: r.b.finished_at ?? now }).eq("id", bookingId);
+  const { error } = await db().from("bookings").update({ brief: brief || null, brief_submitted_at: now, finished_at: r.b.finished_at ?? now }).eq("id", bookingId);
+  if (error) return { error: friendlyError(error.message) };
   await audit(r.me.id, "brief_submitted", bookingId, { program: title(r.b) });
   await notify(await usersWithRoles("admin", "approver"), {
     title: `${first ? "Training finished" : "Brief updated"}: ${title(r.b)}`,

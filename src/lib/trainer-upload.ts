@@ -14,15 +14,21 @@ export function checkTrainerFile(kind: "photo" | "cv", file: File) {
   return null;
 }
 
-// Signed upload straight to storage, then record it on the trainer.
+// Signed upload straight to storage, then record it on the trainer. Never throws: a dropped
+// connection comes back as an error message so the caller's "Uploading…" state always ends.
 export async function uploadTrainerFile(trainerId: string, kind: "photo" | "cv", file: File): Promise<{ error?: string; ok?: string }> {
   const bad = checkTrainerFile(kind, file);
   if (bad) return { error: bad };
-  const u = await createTrainerFileUpload(trainerId, kind, file.name);
-  if ("error" in u && u.error) return { error: u.error };
-  const { path, token } = u as { path: string; token: string };
-  const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!);
-  const { error } = await sb.storage.from(kind === "photo" ? "photos" : "cvs").uploadToSignedUrl(path, token, file, { contentType: file.type });
-  if (error) return { error: error.message };
-  return saveTrainerFile(trainerId, kind, path, file.name);
+  try {
+    const u = await createTrainerFileUpload(trainerId, kind, file.name);
+    if ("error" in u && u.error) return { error: u.error };
+    const { path, token } = u as { path: string; token: string };
+    const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!);
+    const { error } = await sb.storage.from(kind === "photo" ? "photos" : "cvs").uploadToSignedUrl(path, token, file, { contentType: file.type });
+    if (error) return { error: error.message };
+    return await saveTrainerFile(trainerId, kind, path, file.name);
+  } catch (e) {
+    console.error(e);
+    return { error: "The upload didn't finish. Check your connection and try again." };
+  }
 }
