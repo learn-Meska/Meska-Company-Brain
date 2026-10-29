@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Form, Submit } from "@/components/form";
 import { Ticket } from "@/components/ticket";
+import { DealCard } from "@/components/deal-card";
 import { canBook, requireRole } from "@/lib/auth";
 import { AssignPanel } from "@/components/assign-panel";
 import { db } from "@/lib/supabase";
@@ -40,6 +41,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
       )}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <Ticket b={b} canUpload={me.role === "admin" && b.status !== "cancelled"} />
+      {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} />}
 
       {ACTIVE_STATUSES.includes(b.status) && (canBook(me) || b.created_by === me.id) && (
         <section className="card">

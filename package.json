@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:update": "vitest run -u",
+    "check:db": "node --env-file=.env.local scripts/check-schema.mjs",
+    "smoke:deal": "node --env-file=.env.local scripts/smoke-deal.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.9.0",
@@ -29,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

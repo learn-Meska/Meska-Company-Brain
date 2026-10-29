@@ -10,9 +10,20 @@ import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, programVisible, sl
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
 import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, userWithRole, type BookingRow } from "@/lib/notify";
-
-const TIME = /^\d{2}:\d{2}$/;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  contactError,
+  contactFields,
+  DATE,
+  dayError,
+  dealTotal,
+  fmtAmount,
+  PAST_DATE,
+  participantRows,
+  proposalFileError,
+  requestError,
+  TIME,
+  type NewRequest,
+} from "@/lib/deal";
 
 async function loadBookings(ids: string[]) {
   const valid = ids.filter(isUuid);
@@ -31,7 +42,6 @@ function checkFile(fileName: string) {
   if (typeof fileName !== "string" || !FILE_TYPES.test(fileName.trim())) return "That file type isn't allowed. Upload documents, slides, sheets, images, audio/video or a .zip.";
   return null;
 }
-const PAST_DATE = "Trainings can't be scheduled on a date that has already passed.";
 
 function refresh() {
   for (const p of ["/bookings", "/calendar", "/me", "/me/bookings", "/me/availability"]) revalidatePath(p);
@@ -72,80 +82,78 @@ export async function findForDays(input: { audienceId: string; industryId: strin
   return { days, common };
 }
 
-/* ---------- Request a training (trainer optional) ---------- */
+/* ---------- New deal: request a training (trainer optional for the booking team) ---------- */
 
-export type ClientContact = { name: string; email: string; mobile: string };
+type Filters = { industry_id: string };
 
-export type NewRequest = {
-  program_name: string;
-  contact: ClientContact;
-  audience_id: string;
-  function_id: string;
-  industry_id: string;
-  same_trainer: boolean;
-  days: { day_number: number; date: string; start: string; end: string; location: string; content: string; trainer_id?: string }[];
-};
-
-type Filters = { audience_id: string; function_id: string; industry_id: string };
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function contactError(c: ClientContact) {
-  if (!c.name.trim()) return "Enter the client contact's name.";
-  if (!EMAIL.test(c.email.trim())) return "Enter a valid email for the client contact.";
-  if (c.mobile.replace(/\D/g, "").length < 7) return "Enter the client contact's mobile number.";
-  return null;
-}
-const contactFields = (c: ClientContact) => ({ contact_name: c.name.trim(), contact_email: c.email.trim().toLowerCase(), contact_mobile: c.mobile.trim() });
-
-const dayError = (d: { day_number: number; date: string; start: string; end: string }) =>
-  !DATE.test(d.date)
-    ? `Pick a date for Day ${d.day_number}.`
-    : !TIME.test(d.start) || !TIME.test(d.end) || d.end <= d.start
-      ? `Check the time for Day ${d.day_number}.`
-      : !slotsFor(d.start, d.end).length
-        ? `Day ${d.day_number}: the time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM).`
-        : null;
-
-// Trainers free at that day and time who match the audience, function and industry.
+// Trainers free at that day and time who match the industry. A New deal no longer picks an audience level or
+// function (the audience is the uploaded participant list), so those filters are left empty here.
 async function freeTrainers(f: Filters, d: { date: string; start: string; end: string }) {
-  const r = await searchTrainers({ date: d.date, start: d.start, end: d.end, audienceId: f.audience_id, functionId: f.function_id, industryId: f.industry_id, skillIds: [] });
+  const r = await searchTrainers({ date: d.date, start: d.start, end: d.end, audienceId: "", functionId: "", industryId: f.industry_id, skillIds: [] });
   return r.matches.map((t) => ({ id: t.id, full_name: t.full_name, title: t.title }));
 }
 
 // Request page: the trainers Growth may pick for each day (only names, never the availability calendar).
 export async function requestTrainerOptions(input: Filters & { days: { day_number: number; date: string; start: string; end: string }[] }) {
   await requireRole("growth", "admin", "approver");
-  if (!input.audience_id || !input.function_id || !input.industry_id) return { error: "Pick the audience level, function and industry first." };
+  if (!isUuid(String(input?.industry_id ?? ""))) return { error: "Pick the industry first." };
+  if (!Array.isArray(input.days)) return { error: "Add at least one training day." };
   for (const d of input.days) {
     const e = dayError(d);
     if (e) return { error: e };
   }
-  return { days: await Promise.all(input.days.map((d) => freeTrainers(input, d))) };
+  return { days: await Promise.all(input.days.map((d) => freeTrainers({ industry_id: input.industry_id }, d))) };
+}
+
+// Step 3: a one-time URL to upload the proposal straight to storage, under the uploader's own folder.
+export async function createProposalUpload(fileName: string, size: number) {
+  const me = await requireRole("growth", "admin", "approver");
+  const bad = proposalFileError(fileName, size);
+  if (bad) return { error: bad };
+  const path = `${me.id}/${randomUUID()}-${safeName(fileName)}`;
+  const { data, error } = await db().storage.from("proposals").createSignedUploadUrl(path);
+  if (error) return { error: error.message };
+  return { path, token: data.token };
 }
 
 export async function createRequest(input: NewRequest) {
   const me = await requireRole("growth", "admin", "approver");
-  if (!input.program_name.trim()) return { error: "Enter the program name." };
-  const ce = contactError(input.contact);
-  if (ce) return { error: ce };
-  if (![input.audience_id, input.function_id, input.industry_id].every(isUuid)) return { error: "Pick the audience level, function and industry." };
-  if (!input.days.length) return { error: "Add at least one training day." };
-  const today = todayISO();
-  for (const d of input.days) {
-    if (!Number.isInteger(d.day_number) || d.day_number < 1) return { error: "Each day needs a day number of 1 or more." };
-    const e = dayError(d);
-    if (e) return { error: e };
-    if (d.date < today) return { error: `Day ${d.day_number}: ${PAST_DATE}` };
-    if (d.trainer_id && !isUuid(d.trainer_id)) return { error: `Day ${d.day_number}: pick the trainer again.` };
-    if (!d.content.trim()) return { error: `Describe the content for Day ${d.day_number}.` };
-  }
-  // Growth must choose the trainer for every day; admins and booking managers may leave days to assign later.
-  const missing = input.days.find((d) => !d.trainer_id);
-  if (me.role === "growth" && missing) return { error: `Choose a trainer for Day ${missing.day_number}.` };
+  const invalid = requestError(input, { role: me.role, userId: me.id, today: todayISO() });
+  if (invalid) return { error: invalid };
   // A picked trainer must still be free and matching when the request is sent.
   for (const d of input.days) {
     if (d.trainer_id && !(await freeTrainers(input, d)).some((t) => t.id === d.trainer_id))
       return { error: `Day ${d.day_number}: that trainer is no longer available. Pick another or leave it to the booking team.` };
   }
+  // The proposal must really be in storage (the browser uploads it before sending the request).
+  const { error: missingFile } = await db().storage.from("proposals").createSignedUrl(input.proposal.path, 60);
+  if (missingFile) return { error: "The proposal didn't finish uploading. Upload it again." };
+
+  const programName = input.program_name.trim();
+  const valuePerDay = Number(input.value_per_day);
+  const dealDays = Number(input.deal_days);
+  const { data: deal, error: dealErr } = await db()
+    .from("deals")
+    .insert({
+      value_per_day: valuePerDay,
+      days: dealDays,
+      proposal_path: input.proposal.path,
+      proposal_name: String(input.proposal.name).slice(0, 200),
+      proposal_size: Number.isFinite(Number(input.proposal.size)) ? Number(input.proposal.size) : null,
+      created_by: me.id,
+    })
+    .select("id")
+    .single();
+  if (dealErr || !deal) return { error: friendlyError(dealErr?.message ?? "Could not save the deal.") };
+  const dealId = (deal as { id: string }).id;
+  // Anything that fails after this point removes the deal again (its participants go with it).
+  const undo = () => db().from("deals").delete().eq("id", dealId);
+  const { error: partErr } = await db().from("deal_participants").insert(participantRows(dealId, input.participants));
+  if (partErr) {
+    await undo();
+    return { error: friendlyError(partErr.message) };
+  }
+
   const batch = input.days.length > 1 ? randomUUID() : null;
   const now = new Date().toISOString();
   const { data, error } = await db()
@@ -153,7 +161,8 @@ export async function createRequest(input: NewRequest) {
     .insert(
       input.days.map((d) => ({
         batch_id: batch,
-        program_name: input.program_name.trim(),
+        deal_id: dealId,
+        program_name: programName,
         day_number: d.day_number,
         trainer_id: d.trainer_id || null,
         date: d.date,
@@ -161,8 +170,8 @@ export async function createRequest(input: NewRequest) {
         end_time: d.end,
         location: d.location.trim() || null,
         ...contactFields(input.contact),
-        audience_id: input.audience_id,
-        function_id: input.function_id,
+        audience_id: null,
+        function_id: null,
         industry_id: input.industry_id,
         content: d.content.replace(/\r\n/g, "\n").trim(),
         status: d.trainer_id ? "awaiting_trainer" : "needs_trainer",
@@ -172,7 +181,10 @@ export async function createRequest(input: NewRequest) {
       })),
     )
     .select("id");
-  if (error) return { error: friendlyError(error.message) };
+  if (error) {
+    await undo();
+    return { error: friendlyError(error.message) };
+  }
   const ids = ((data ?? []) as { id: string }[]).map((r) => r.id);
   const rows = (await loadBookings(ids)).sort((a, b) => a.day_number - b.day_number);
   // The request is saved; if it can't be re-read, don't report a failure (that would invite a duplicate).
@@ -180,8 +192,9 @@ export async function createRequest(input: NewRequest) {
     refresh();
     return { ok: "Request sent. It's on the calendar.", ids };
   }
+  const total = dealTotal(valuePerDay, dealDays);
   for (const b of rows) {
-    await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null });
+    await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null, deal: dealId, value_per_day: valuePerDay, days: dealDays, participants: input.participants.length });
     if (b.trainer_id) await emailAssignment(b);
   }
   const open = rows.filter((b) => !b.trainer_id);
@@ -199,9 +212,10 @@ export async function createRequest(input: NewRequest) {
         ["Program", esc(input.program_name)],
         ["Client contact", `${esc(input.contact.name)} · ${esc(input.contact.email)} · ${esc(input.contact.mobile)}`],
         ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${b.trainers ? esc(b.trainers.full_name) : "<i>needs a trainer</i>"}`] as [string, string]),
-        ["Audience", esc(rows[0].audience?.name ?? "")],
-        ["Function", esc(rows[0].func?.name ?? "")],
         ["Industry", esc(rows[0].industry?.name ?? "")],
+        ["Participants", String(input.participants.length)],
+        ["Deal value", `${fmtAmount(valuePerDay)} per day × ${dealDays} ${dealDays === 1 ? "day" : "days"} = <b>${fmtAmount(total)}</b>`],
+        ["Proposal", esc(input.proposal.name)],
       ],
       content: rows.map((b) => `Day ${b.day_number}: ${b.content}`).join("\n\n"),
       button: open.length ? "Assign a trainer" : "View the training",
@@ -564,6 +578,22 @@ export async function materialLink(id: string) {
   // Keeps non-Latin names (e.g. Arabic) and drops only characters that are unsafe in a file name.
   const name = checkFile(m.file_name) ? m.file_path.split("/").pop()! : m.file_name.replace(/[\x00-\x1f\x7f/\\:*?"<>|]+/g, "_").trim() || m.file_path.split("/").pop()!;
   const { data: s, error } = await db().storage.from("materials").createSignedUrl(m.file_path, 300, { download: name });
+  if (error) return { error: error.message };
+  return { url: s.signedUrl };
+}
+
+/* ---------- Deal proposal ---------- */
+
+// The Meska team only; trainers never see the commercial side of a deal.
+export async function proposalLink(dealId: string) {
+  await requireRole("admin", "approver", "growth");
+  if (!isUuid(dealId)) return { error: "File not found." };
+  const { data } = await db().from("deals").select("proposal_path, proposal_name").eq("id", dealId).maybeSingle();
+  const d = data as { proposal_path: string; proposal_name: string } | null;
+  if (!d) return { error: "File not found." };
+  const stored = d.proposal_path.split("/").pop()!;
+  const name = proposalFileError(d.proposal_name) ? stored : d.proposal_name.replace(/[\x00-\x1f\x7f/\\:*?"<>|]+/g, "_").trim() || stored;
+  const { data: s, error } = await db().storage.from("proposals").createSignedUrl(d.proposal_path, 300, { download: name });
   if (error) return { error: error.message };
   return { url: s.signedUrl };
 }

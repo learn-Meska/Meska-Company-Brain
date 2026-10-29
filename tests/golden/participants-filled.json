@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Ali, Ahmed",
+    "title": "HR Manager",
+    "department": "Human Resources"
+  },
+  {
+    "name": "سارة حسن",
+    "title": "Head of \"Finance\"",
+    "department": "Finance"
+  },
+  {
+    "name": "Omar Khaled",
+    "title": "",
+    "department": "Sales"
+  },
+  {
+    "name": "Multi Line",
+    "title": "Engineer",
+    "department": "IT"
+  }
+]

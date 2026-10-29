@@ -69,6 +69,8 @@ export async function audit(actorId: string | null, action: string, bookingId: s
 export type BookingRow = {
   id: string;
   batch_id: string | null;
+  // the New deal this day belongs to (value, proposal, participants); null for requests made before deals existed
+  deal_id: string | null;
   program_name: string;
   day_number: number;
   trainer_id: string | null;
@@ -121,8 +123,9 @@ export function bookingRows(b: BookingRow, forTrainer = false): EmailRow[] {
     ["Time", `${fmtTime(b.start_time)} – ${fmtTime(b.end_time)}`],
     ["Location", esc(b.location || "To be confirmed")],
     ["Industry", esc(b.industry?.name ?? "—")],
-    ["Function", esc(b.func?.name ?? "—")],
-    ["Audience level", esc(b.audience?.name ?? "—")],
+    // New deals have no function or audience level (the audience is the participant list), so those rows are left out.
+    ...(b.func ? [["Function", esc(b.func.name)] as EmailRow] : []),
+    ...(b.audience ? [["Audience level", esc(b.audience.name)] as EmailRow] : []),
     ["Status", esc(STATUS_LABEL[b.status] ?? b.status)],
   ];
 }

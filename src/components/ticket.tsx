@@ -40,10 +40,11 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
         "To be confirmed"
       ),
     ],
-    ["Audience", b.audience?.name],
-    ["Function", b.func?.name],
+    // requests made before New deals had an audience level, function and skills; new deals only have the industry
+    ...(b.audience ? [["Audience", b.audience.name] as [string, React.ReactNode]] : []),
+    ...(b.func ? [["Function", b.func.name] as [string, React.ReactNode]] : []),
     ["Industry", b.industry?.name],
-    ["Skills", ((skills ?? []) as { name: string }[]).map((s) => s.name).join(", ") || "—"],
+    ...(b.skill_ids.length ? [["Skills", ((skills ?? []) as { name: string }[]).map((s) => s.name).join(", ") || "—"] as [string, React.ReactNode]] : []),
   ];
   // the client contact is for the Meska team only
   if (!trainerView && b.contact_name) {

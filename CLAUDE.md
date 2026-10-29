@@ -28,11 +28,21 @@ npm run dev          # dev server on http://localhost:3000
 npm run build
 npm run lint         # eslint (flat config, eslint-config-next)
 npx tsc --noEmit     # typecheck
+npm test             # vitest: golden tests for the main flow (tests/)
+npm run test:update  # rewrite the golden files after an intended change
+npm run check:db     # compare the live Supabase schema with tests/schema.json
 node --env-file=.env.local scripts/create-admin.mjs "Full Name" email@example.com   # create or re-link the first admin; prints a set-password link
 node --env-file=.env.local scripts/import-feedback.mjs path/to/scorecard.html       # one-off import of historical feedback
 ```
 
-There is no test suite.
+## Golden test rules
+
+The main flow (Growth sends a New deal → deal, participants and one booking per day are saved → trainer emailed → booking team notified) is guarded by golden tests. CI (`.github/workflows/ci.yml`) runs lint, typecheck and `npm test` on every push and pull request.
+
+- Run `npm run lint`, `npx tsc --noEmit` and `npm test` before every commit. All must pass.
+- Never edit or regenerate a file in `tests/golden/` just to make a test pass. Run `npm run test:update` only when the behaviour change is intended, review the golden diff, and say why in the commit message.
+- A new database column or table goes in a new file in `supabase/migrations/` **and** in `tests/schema.json`. Then run the migration in Supabase and `npm run check:db`.
+- Validation the server relies on lives in pure modules (like `src/lib/deal.ts`) so it can be tested without a database. `tests/support/fake-db.ts` stands in for `db()` in flow tests.
 
 Env vars are listed in `.env.example`. `.env.local` is gitignored, and production values live in Vercel's project settings. `SITE_URL` must be the deployed URL in Vercel because it builds every link in emails.
 
@@ -40,7 +50,7 @@ Env vars are listed in `.env.example`. `.env.local` is gitignored, and productio
 
 **Data access is server-only, through the service-role client.** `src/lib/supabase.ts` exposes `authClient()`, a cookie-based client used only to find out who is signed in, and `db()`, a client using `SUPABASE_SECRET_KEY` that does every read and write. RLS does not protect anything, so every server action and route must check permissions with the `require*` helpers in `src/lib/auth.ts` before calling `db()`. Never use `db()` from client components. Every export of a `"use server"` file can be called directly from the browser with any arguments. So each export checks auth itself and rebuilds rows from known fields (never spread client objects into inserts or updates). Helpers that skip auth go in `server-only` modules under `src/lib` instead. PostgREST returns at most 1,000 rows per request, so read anything that can grow with `fetchAll()`. Guard state changes on the state you checked, e.g. `.eq("status", b.status)` followed by `.select("id")`, and treat 0 returned rows as "changed meanwhile".
 
-**The database schema is not in this repo.** Tables, triggers, storage buckets (`photos`, `cvs`, `materials`) and the hourly pg_cron job live in the Supabase project, which `NEXT_PUBLIC_SUPABASE_URL` points to. Inspect it with the Supabase MCP tools before changing queries. Database triggers enforce booking rules and raise errors (`slot_already_booked`, `trainer_not_available`, `time_outside_slots`), which `friendlyError()` in `src/lib/format.ts` turns into readable messages. `slotsFor()` in that file must stay in sync with the database function `slots_for()`.
+**Most of the database schema is not in this repo** (changes since the New deal feature are in `supabase/migrations/`). Tables, triggers, storage buckets (`photos`, `cvs`, `materials`) and the hourly pg_cron job live in the Supabase project, which `NEXT_PUBLIC_SUPABASE_URL` points to. Inspect it with the Supabase MCP tools before changing queries. Database triggers enforce booking rules and raise errors (`slot_already_booked`, `trainer_not_available`, `time_outside_slots`), which `friendlyError()` in `src/lib/format.ts` turns into readable messages. `slotsFor()` in that file must stay in sync with the database function `slots_for()`.
 
 **Roles and views.** Roles are `admin`, `approver` (shown as "Booking manager"), `growth` and `trainer`, stored in `app_users.roles[]`. The highest role becomes `app_users.role`. A login can switch between the views it holds, and admins can preview any view, through the `view_as` cookie. `getCurrentUser()` resolves the active `role`, `real_role`, the available `views`, and `trainer_id` if the login is linked to a `trainers` row. Check permissions with the helpers (`canBook`, `canManageTrainers`, `canEditSettings`, `requireTrainer`, …) instead of comparing role strings.
 
@@ -48,6 +58,8 @@ Env vars are listed in `.env.example`. `.env.local` is gitignored, and productio
 
 **Booking lifecycle.** The labels are in `STATUS_LABEL`, and the logic is in `src/app/(app)/bookings/actions.ts`:
 `needs_trainer` (Growth's `createRequest`; a multi-day request shares one `batch_id` with one row per day) → `awaiting_trainer` (a manager's `assignTrainer`) → `confirmed`, or back to `needs_trainer` if the trainer declines in `respondBooking`. Bookings can also become `cancelled`. Free slots come from `availability` rows minus `booking_locks`; see `searchTrainers()` in `src/lib/search.ts`. A day has two slots: morning (9 AM–5 PM) and evening (6 PM–11 PM).
+
+**New deal (`/request`).** Four steps: client & program (program name, industry, client contact), audience (a participant CSV with name, title, department; the template is `PARTICIPANTS_TEMPLATE_CSV`), proposal & value (a file in the private `proposals` bucket, value per training day and number of days; total = value × days), and training days. `createRequest` saves one `deals` row, its `deal_participants`, then the bookings with `deal_id`, and deletes the deal again if a later step fails. Trainer matching for a New deal uses the industry only (no audience level or function). Deal data is shown only to the Meska team on `/bookings/[id]` (`DealCard`); never put it in the trainer's ticket, emails or `/me` pages.
 
 **Time rules (Cairo time, `src/lib/format.ts`).** Trainers only see the program (client) name 48 hours before the session (`programVisible`, `trainerTitle`, and `bookingRows(b, forTrainer=true)`). Anything shown or emailed to a trainer must go through these helpers. The participant feedback form is open from the session start until 6 hours after it ends (`feedbackWindow`).
 
