@@ -33,7 +33,7 @@ export default async function MePage() {
         {t.cv_path && <a href={`/trainers/${t.id}/cv`} className="btn-ghost">⬇ My CV</a>}
         <a href={`/trainers/${t.id}/bio`} className="btn-ghost">⬇ My profile PDF</a>
       </div>
-      <ProfileView t={t} />
+      <ProfileView t={t} showTier={false} />
     </div>
   );
 }

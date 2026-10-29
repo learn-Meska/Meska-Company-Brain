@@ -1,10 +1,11 @@
 import { MonthCalendar, monthGrid } from "@/components/month-calendar";
-import { requireRole } from "@/lib/auth";
+import { canBook, requireRole } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
+import { todayISO } from "@/lib/format";
 
 export default async function CalendarPage({ searchParams }: PageProps<"/calendar">) {
-  await requireRole("admin", "approver", "growth");
+  const me = await requireRole("admin", "approver", "growth");
   const { m, trainer } = await searchParams;
   const grid = monthGrid(m);
   let q = db()
@@ -14,8 +15,24 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
     .gte("date", grid.cells[0])
     .lte("date", grid.cells[grid.cells.length - 1])
     .order("start_time");
-  if (typeof trainer === "string" && trainer) q = q.eq("trainer_id", trainer);
-  const [{ data }, { data: trainers }] = await Promise.all([q, db().from("trainers").select("id, full_name").order("full_name")]);
+  const picked = typeof trainer === "string" && trainer ? trainer : "";
+  if (picked) q = q.eq("trainer_id", picked);
+  // With one trainer picked, admins and booking managers see the days they marked available that still have a
+  // free slot (today onwards). Growth only sees booked dates.
+  const showFree = !!picked && canBook(me);
+  const from = [grid.cells[0], todayISO()].sort()[1];
+  const to = grid.cells[grid.cells.length - 1];
+  const [{ data }, { data: trainers }, { data: avail }, { data: locks }] = await Promise.all([
+    q,
+    db().from("trainers").select("id, full_name").order("full_name"),
+    showFree ? db().from("availability").select("date, slot").eq("trainer_id", picked).gte("date", from).lte("date", to) : Promise.resolve({ data: [] }),
+    showFree ? db().from("booking_locks").select("date, slot").eq("trainer_id", picked).gte("date", from).lte("date", to) : Promise.resolve({ data: [] }),
+  ]);
+  const taken = new Set(((locks ?? []) as { date: string; slot: string }[]).map((l) => `${l.date}|${l.slot}`));
+  const available = new Map<string, string[]>();
+  for (const a of (avail ?? []) as { date: string; slot: string }[]) {
+    if (!taken.has(`${a.date}|${a.slot}`)) available.set(a.date, [...(available.get(a.date) ?? []), a.slot].sort().reverse());
+  }
   const qs = (mo: string) => `/calendar?m=${mo}${typeof trainer === "string" && trainer ? `&trainer=${trainer}` : ""}`;
   return (
     <MonthCalendar
@@ -24,6 +41,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
       href={(b) => `/bookings/${b.id}`}
       title={(b) => `${b.program_name} - Day ${b.day_number}`}
       qs={qs}
+      available={showFree ? available : undefined}
       toolbar={
         <form className="flex gap-2" action="/calendar">
           <input type="hidden" name="m" value={grid.month} />

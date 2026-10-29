@@ -3,6 +3,7 @@ import { StatusBadge } from "@/components/status";
 import { db } from "@/lib/supabase";
 import { feedbackWindow, isPast, fmtDate, fmtDateTime, fmtTime, programVisible, SLOT_LABEL } from "@/lib/format";
 import { bookingFeedback } from "@/lib/feedback";
+import { fmtNps } from "@/lib/survey";
 import { googleCalendarUrl } from "@/lib/ics";
 import { siteUrl } from "@/lib/email";
 import type { BookingRow } from "@/lib/notify";
@@ -44,6 +45,17 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
     ["Industry", b.industry?.name],
     ["Skills", ((skills ?? []) as { name: string }[]).map((s) => s.name).join(", ") || "—"],
   ];
+  // the client contact is for the Meska team only
+  if (!trainerView && b.contact_name) {
+    rows.push([
+      "Client contact",
+      <span key="c">
+        {b.contact_name}
+        {b.contact_email && <> · <a href={`mailto:${b.contact_email}`} className="text-blue hover:underline">{b.contact_email}</a></>}
+        {b.contact_mobile && <> · <a href={`tel:${b.contact_mobile.replace(/[^\d+]/g, "")}`} className="text-blue hover:underline">{b.contact_mobile}</a></>}
+      </span>,
+    ]);
+  }
   return (
     <section className="card space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -148,37 +160,31 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
             <p className="text-sm text-muted">No feedback yet. Share the QR code with participants at the end of the session.</p>
           ) : (
             <>
-              <div className="mb-3 grid grid-cols-2 gap-3 sm:max-w-md">
+              <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="stat-hot rounded-xl p-3 text-white">
-                  <div className="text-2xl font-semibold tabular-nums">{fb.trainer?.toFixed(2)}</div>
-                  <div className="text-[10.5px] uppercase tracking-wider text-[#93C5FD]">Trainer / 5</div>
+                  <div className="text-2xl font-semibold tabular-nums">{fmtNps(fb.nps)}</div>
+                  <div className="text-[10.5px] uppercase tracking-wider text-[#93C5FD]">NPS (−100 to 100)</div>
+                  <div className="mt-1 text-[11px] text-[#C7D7F5]">
+                    {fb.promoters} promoters · {fb.passives} passives · {fb.detractors} detractors
+                  </div>
                 </div>
-                <div className="rounded-xl border border-ice2 bg-ice p-3">
-                  <div className="text-2xl font-bold tabular-nums text-royal-deep">{fb.content?.toFixed(2)}</div>
-                  <div className="text-[10.5px] font-medium uppercase tracking-wider text-[#3B82F6]">Content / 5</div>
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {(
-                  [
-                    ["What participants liked", fb.liked, "bg-good-bg text-good"],
-                    ["What could be improved", fb.improve, "bg-warn-bg text-warn"],
-                  ] as const
-                ).map(([label, list, tone]) => (
-                  <div key={label}>
-                    <div className={`mb-1.5 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone}`}>{label}</div>
-                    {list.length ? (
-                      <ul className="space-y-1.5 text-sm">
-                        {list.map((c, i) => (
-                          <li key={i} className="rounded-lg bg-surface2 px-3 py-2">“{c}”</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-xs text-faint">No comments.</p>
-                    )}
+                {fb.yes.map((q) => (
+                  <div key={q.key} className="rounded-xl border border-ice2 bg-ice p-3">
+                    <div className="text-2xl font-bold tabular-nums text-royal-deep">{q.percent != null ? `${q.percent}%` : "—"}</div>
+                    <div className="text-[10.5px] font-medium uppercase tracking-wider text-[#3B82F6]">Yes · {q.short}</div>
                   </div>
                 ))}
               </div>
+              <div className="mb-1.5 inline-block rounded-full bg-surface2 px-2.5 py-0.5 text-xs font-semibold text-ink">Main reason for their score</div>
+              {fb.reasons.length ? (
+                <ul className="space-y-1.5 text-sm">
+                  {fb.reasons.map((c, i) => (
+                    <li key={i} className="rounded-lg bg-surface2 px-3 py-2">“{c}”</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-faint">No comments.</p>
+              )}
             </>
           )}
         </div>

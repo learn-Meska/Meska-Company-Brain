@@ -72,33 +72,82 @@ export async function findForDays(input: { audienceId: string; industryId: strin
   return { days, common };
 }
 
-/* ---------- Growth: request a training (no trainer yet) ---------- */
+/* ---------- Request a training (trainer optional) ---------- */
+
+export type ClientContact = { name: string; email: string; mobile: string };
 
 export type NewRequest = {
   program_name: string;
+  contact: ClientContact;
   audience_id: string;
   function_id: string;
   industry_id: string;
   same_trainer: boolean;
-  days: { day_number: number; date: string; start: string; end: string; location: string; skill_ids: string[]; content: string }[];
+  days: { day_number: number; date: string; start: string; end: string; location: string; content: string; trainer_id?: string }[];
 };
+
+type Filters = { audience_id: string; function_id: string; industry_id: string };
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function contactError(c: ClientContact) {
+  if (!c.name.trim()) return "Enter the client contact's name.";
+  if (!EMAIL.test(c.email.trim())) return "Enter a valid email for the client contact.";
+  if (c.mobile.replace(/\D/g, "").length < 7) return "Enter the client contact's mobile number.";
+  return null;
+}
+const contactFields = (c: ClientContact) => ({ contact_name: c.name.trim(), contact_email: c.email.trim().toLowerCase(), contact_mobile: c.mobile.trim() });
+
+const dayError = (d: { day_number: number; date: string; start: string; end: string }) =>
+  !DATE.test(d.date)
+    ? `Pick a date for Day ${d.day_number}.`
+    : !TIME.test(d.start) || !TIME.test(d.end) || d.end <= d.start
+      ? `Check the time for Day ${d.day_number}.`
+      : !slotsFor(d.start, d.end).length
+        ? `Day ${d.day_number}: the time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM).`
+        : null;
+
+// Trainers free at that day and time who match the audience, function and industry.
+async function freeTrainers(f: Filters, d: { date: string; start: string; end: string }) {
+  const r = await searchTrainers({ date: d.date, start: d.start, end: d.end, audienceId: f.audience_id, functionId: f.function_id, industryId: f.industry_id, skillIds: [] });
+  return r.matches.map((t) => ({ id: t.id, full_name: t.full_name, title: t.title }));
+}
+
+// Request page: the trainers Growth may pick for each day (only names, never the availability calendar).
+export async function requestTrainerOptions(input: Filters & { days: { day_number: number; date: string; start: string; end: string }[] }) {
+  await requireRole("growth", "admin", "approver");
+  if (!input.audience_id || !input.function_id || !input.industry_id) return { error: "Pick the audience level, function and industry first." };
+  for (const d of input.days) {
+    const e = dayError(d);
+    if (e) return { error: e };
+  }
+  return { days: await Promise.all(input.days.map((d) => freeTrainers(input, d))) };
+}
 
 export async function createRequest(input: NewRequest) {
   const me = await requireRole("growth", "admin", "approver");
   if (!input.program_name.trim()) return { error: "Enter the program name." };
+  const ce = contactError(input.contact);
+  if (ce) return { error: ce };
   if (![input.audience_id, input.function_id, input.industry_id].every(isUuid)) return { error: "Pick the audience level, function and industry." };
   if (!input.days.length) return { error: "Add at least one training day." };
   const today = todayISO();
   for (const d of input.days) {
     if (!Number.isInteger(d.day_number) || d.day_number < 1) return { error: "Each day needs a day number of 1 or more." };
-    if (!DATE.test(d.date)) return { error: `Pick a date for Day ${d.day_number}.` };
+    const e = dayError(d);
+    if (e) return { error: e };
     if (d.date < today) return { error: `Day ${d.day_number}: ${PAST_DATE}` };
-    if (!Array.isArray(d.skill_ids) || !d.skill_ids.every(isUuid)) return { error: `Day ${d.day_number}: pick the skills again.` };
-    if (!TIME.test(d.start) || !TIME.test(d.end) || d.end <= d.start) return { error: `Check the time for Day ${d.day_number}.` };
-    if (!slotsFor(d.start, d.end).length) return { error: `Day ${d.day_number}: the time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM).` };
+    if (d.trainer_id && !isUuid(d.trainer_id)) return { error: `Day ${d.day_number}: pick the trainer again.` };
     if (!d.content.trim()) return { error: `Describe the content for Day ${d.day_number}.` };
   }
+  // Growth must choose the trainer for every day; admins and booking managers may leave days to assign later.
+  const missing = input.days.find((d) => !d.trainer_id);
+  if (me.role === "growth" && missing) return { error: `Choose a trainer for Day ${missing.day_number}.` };
+  // A picked trainer must still be free and matching when the request is sent.
+  for (const d of input.days) {
+    if (d.trainer_id && !(await freeTrainers(input, d)).some((t) => t.id === d.trainer_id))
+      return { error: `Day ${d.day_number}: that trainer is no longer available. Pick another or leave it to the booking team.` };
+  }
   const batch = input.days.length > 1 ? randomUUID() : null;
+  const now = new Date().toISOString();
   const { data, error } = await db()
     .from("bookings")
     .insert(
@@ -106,17 +155,18 @@ export async function createRequest(input: NewRequest) {
         batch_id: batch,
         program_name: input.program_name.trim(),
         day_number: d.day_number,
-        trainer_id: null,
+        trainer_id: d.trainer_id || null,
         date: d.date,
         start_time: d.start,
         end_time: d.end,
         location: d.location.trim() || null,
+        ...contactFields(input.contact),
         audience_id: input.audience_id,
         function_id: input.function_id,
         industry_id: input.industry_id,
-        skill_ids: d.skill_ids,
         content: d.content.replace(/\r\n/g, "\n").trim(),
-        status: "needs_trainer",
+        status: d.trainer_id ? "awaiting_trainer" : "needs_trainer",
+        decided_at: d.trainer_id ? now : null,
         same_trainer_pref: input.same_trainer && input.days.length > 1,
         created_by: me.id,
       })),
@@ -130,23 +180,31 @@ export async function createRequest(input: NewRequest) {
     refresh();
     return { ok: "Request sent. It's on the calendar.", ids };
   }
-  for (const b of rows) await audit(me.id, "training_requested", b.id, { program: title(b) });
-  await notify(await usersWithRoles("admin", "approver"), {
-    title: `Trainer needed: ${input.program_name}${rows.length > 1 ? ` (${rows.length} days)` : ""}`,
-    body: `${me.full_name} requested ${rows.map((b) => when(b)).join("; ")}${input.same_trainer && rows.length > 1 ? " · same trainer preferred" : ""}`,
+  for (const b of rows) {
+    await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null });
+    if (b.trainer_id) await emailAssignment(b);
+  }
+  const open = rows.filter((b) => !b.trainer_id);
+  const sameNote = input.same_trainer && open.length > 1;
+  await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
+    title: open.length ? `Trainer needed: ${input.program_name}${rows.length > 1 ? ` (${open.length} of ${rows.length} days)` : ""}` : `New booking: ${input.program_name} — trainer emailed`,
+    body: `${me.full_name} requested ${rows.map((b) => `${when(b)}${b.trainers ? ` (${b.trainers.full_name})` : ""}`).join("; ")}${sameNote ? " · same trainer preferred" : ""}`,
     link: `/bookings/${rows[0].id}`,
     email: {
-      subject: `Trainer needed: ${input.program_name}`,
-      intro: `<b>${esc(me.full_name)}</b> requested ${rows.length > 1 ? `${rows.length} training days` : "a training"}. Please assign a trainer.${input.same_trainer && rows.length > 1 ? " <b>Same trainer preferred for all days.</b>" : ""}`,
+      subject: open.length ? `Trainer needed: ${input.program_name}` : `New booking: ${input.program_name}`,
+      intro: `<b>${esc(me.full_name)}</b> requested ${rows.length > 1 ? `${rows.length} training days` : "a training"}. ${
+        open.length ? `Please assign a trainer${rows.length > open.length ? " for the days without one" : ""}.` : "The chosen trainer was emailed to confirm."
+      }${sameNote ? " <b>Same trainer preferred for all days.</b>" : ""}`,
       rows: [
         ["Program", esc(input.program_name)],
-        ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""}`] as [string, string]),
+        ["Client contact", `${esc(input.contact.name)} · ${esc(input.contact.email)} · ${esc(input.contact.mobile)}`],
+        ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${b.trainers ? esc(b.trainers.full_name) : "<i>needs a trainer</i>"}`] as [string, string]),
         ["Audience", esc(rows[0].audience?.name ?? "")],
         ["Function", esc(rows[0].func?.name ?? "")],
         ["Industry", esc(rows[0].industry?.name ?? "")],
       ],
       content: rows.map((b) => `Day ${b.day_number}: ${b.content}`).join("\n\n"),
-      button: "Assign a trainer",
+      button: open.length ? "Assign a trainer" : "View the training",
     },
   });
   refresh();
@@ -306,10 +364,11 @@ ${changes.map((c) => `<tr><td style="padding:8px 12px;border-top:1px solid #E1E7
 </table>`;
 }
 
-// Admins and booking managers can change any active training; Growth only their own requests still waiting for a trainer.
+// Admins and booking managers can change any active training; Growth only their own requests until the trainer confirms.
+const GROWTH_EDITABLE = ["needs_trainer", "awaiting_trainer"];
 function mayChange(me: { id: string; role: string }, b: BookingRow) {
   if (me.role === "admin" || me.role === "approver") return true;
-  return me.role === "growth" && b.status === "needs_trainer" && b.created_by === me.id;
+  return me.role === "growth" && GROWTH_EDITABLE.includes(b.status) && b.created_by === me.id;
 }
 
 export async function editBooking(fd: FormData) {
@@ -377,6 +436,25 @@ export async function editBooking(fd: FormData) {
   refresh();
   revalidatePath(`/bookings/${id}`);
   return { ok: fresh.trainer_id ? "Saved. The trainer, admins and booking managers were notified of the changes." : "Saved. Admins and booking managers were notified of the changes." };
+}
+
+/* ---------- Client contact (whole request) ---------- */
+
+// The booking team, or the Growth member who made the request, can correct the client contact for every day of it.
+export async function updateContact(fd: FormData) {
+  const me = await requireRole("admin", "approver", "growth");
+  const id = String(fd.get("id"));
+  const [b] = await loadBookings([id]);
+  if (!b || !(me.role === "admin" || me.role === "approver" || b.created_by === me.id)) return { error: "Booking not found." };
+  const c = { name: String(fd.get("contact_name") ?? ""), email: String(fd.get("contact_email") ?? ""), mobile: String(fd.get("contact_mobile") ?? "") };
+  const ce = contactError(c);
+  if (ce) return { error: ce };
+  const q = db().from("bookings").update(contactFields(c));
+  const { error } = await (b.batch_id ? q.eq("batch_id", b.batch_id) : q.eq("id", id));
+  if (error) return { error: friendlyError(error.message) };
+  await audit(me.id, "client_contact_updated", id, { program: b.program_name, contact: contactFields(c) });
+  revalidatePath(`/bookings/${id}`);
+  return { ok: b.batch_id ? "Client contact saved for every day of this request." : "Client contact saved." };
 }
 
 /* ---------- Cancel ---------- */

@@ -4,6 +4,7 @@ import { cronAuthorized } from "@/lib/cron";
 import { esc, retryFailedEmails } from "@/lib/email";
 import { feedbackWindow, fmtDate, trainerTitle } from "@/lib/format";
 import { summarize, type Response } from "@/lib/feedback";
+import { fmtNps } from "@/lib/survey";
 import { BOOKING_SELECT, notify, trainerRecipient, usersWithRoles, type BookingRow } from "@/lib/notify";
 
 const list = (items: string[]) =>
@@ -12,7 +13,7 @@ const list = (items: string[]) =>
     : `<p style="margin:6px 0 0;font-size:13px;color:#97A3B8">No comments.</p>`;
 
 // Runs hourly (Supabase pg_cron). Once a day's feedback form closes (6h after the session),
-// emails the trainer their averages and the participants' comments.
+// emails the trainer their NPS, Yes/No results and the participants' reasons.
 export async function GET(request: NextRequest) {
   if (!cronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -32,17 +33,18 @@ export async function GET(request: NextRequest) {
     }
     const s = summarize((rows ?? []) as Response[]);
     if (s.count > 0) {
+      const yesCells = s.yes
+        .map((q) => `<td style="width:8px"></td><td style="background:#EFF6FF;border:1px solid #DBEAFE;border-radius:12px;padding:12px 14px;vertical-align:top"><div style="font-size:22px;font-weight:700;color:#1E3A8A">${q.percent != null ? `${q.percent}%` : "—"}</div><div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#3B82F6">Yes · ${esc(q.short)}</div></td>`)
+        .join("");
       const scores = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr>
-<td style="background:linear-gradient(160deg,#1D4ED8,#1E3A8A);border-radius:12px;padding:14px 18px;color:#fff"><div style="font-size:26px;font-weight:700">${s.trainer?.toFixed(2)}</div><div style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:#93C5FD">Trainer / 5</div></td>
-<td style="width:10px"></td>
-<td style="background:#EFF6FF;border:1px solid #DBEAFE;border-radius:12px;padding:14px 18px"><div style="font-size:26px;font-weight:700;color:#1E3A8A">${s.content?.toFixed(2)}</div><div style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:#3B82F6">Content / 5</div></td>
+<td style="background:linear-gradient(160deg,#1D4ED8,#1E3A8A);border-radius:12px;padding:12px 16px;color:#fff;vertical-align:top"><div style="font-size:26px;font-weight:700">${fmtNps(s.nps)}</div><div style="font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:#93C5FD">NPS</div><div style="font-size:11px;color:#C7D7F5;margin-top:4px">${s.promoters} promoters · ${s.passives} passives · ${s.detractors} detractors</div></td>
+${yesCells}
 </tr></table>
-<div style="margin:0 0 14px"><b style="color:#0E7C55;font-size:13px">What participants liked</b>${list(s.liked)}</div>
-<div style="margin:0 0 18px"><b style="color:#A8650E;font-size:13px">What could be improved</b>${list(s.improve)}</div>`;
+<div style="margin:0 0 18px"><b style="color:#1E3A8A;font-size:13px">Main reason for their score</b>${list(s.reasons)}</div>`;
       // Sent once; if Gmail rejects the email, retryFailedEmails() re-sends just the email later.
       await notify([await trainerRecipient(b)], {
-        title: `Your evaluation: ${trainerTitle(b)} — ${s.trainer?.toFixed(2)}/5`,
-        body: `${s.count} participants · trainer ${s.trainer?.toFixed(2)} · content ${s.content?.toFixed(2)}`,
+        title: `Your evaluation: ${trainerTitle(b)} — NPS ${fmtNps(s.nps)}`,
+        body: `${s.count} participants · NPS ${fmtNps(s.nps)}`,
         link: `/me/bookings/${b.id}`,
         email: {
           subject: `Your training evaluation — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest) {
       });
       await notify(await usersWithRoles("admin", "approver"), {
         title: `Feedback in: ${b.program_name} — Day ${b.day_number} (${b.trainers?.full_name})`,
-        body: `${s.count} responses · trainer ${s.trainer?.toFixed(2)}/5 · content ${s.content?.toFixed(2)}/5`,
+        body: `${s.count} responses · NPS ${fmtNps(s.nps)}`,
         link: `/bookings/${b.id}`,
       });
       sent++;
