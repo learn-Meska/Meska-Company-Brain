@@ -173,7 +173,8 @@ export async function createRequest(input: NewRequest) {
         audience_id: null,
         function_id: null,
         industry_id: input.industry_id,
-        content: d.content.replace(/\r\n/g, "\n").trim(),
+        // the column is NOT NULL; a New deal has no per-day content (the booking team can add it when editing a day)
+        content: "",
         status: d.trainer_id ? "awaiting_trainer" : "needs_trainer",
         decided_at: d.trainer_id ? now : null,
         same_trainer_pref: input.same_trainer && input.days.length > 1,
@@ -217,7 +218,6 @@ export async function createRequest(input: NewRequest) {
         ["Deal value", `${fmtAmount(valuePerDay)} per day × ${dealDays} ${dealDays === 1 ? "day" : "days"} = <b>${fmtAmount(total)}</b>`],
         ["Proposal", esc(input.proposal.name)],
       ],
-      content: rows.map((b) => `Day ${b.day_number}: ${b.content}`).join("\n\n"),
       button: open.length ? "Assign a trainer" : "View the training",
     },
   });
@@ -303,7 +303,7 @@ async function emailAssignment(b: BookingRow) {
       subject: `Training assignment — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
       intro: `You have been booked to deliver a training for a client in the <b>${esc(b.industry?.name ?? "")}</b> industry on <b>${esc(fmtDate(b.date))}</b>, ${fmtTime(b.start_time)} – ${fmtTime(b.end_time)}. Please review the details below and <b>confirm that you received this assignment</b> within ${hours} hours.`,
       rows: bookingRows(b, true),
-      content: b.content,
+      content: b.content || undefined,
       button: "Confirm the assignment",
       extra: `<p style="margin:0 0 16px;font-size:13px;color:#33415C">The calendar invite is attached. Open it to add this training to your calendar.</p>`,
       attachments: [{ filename: "meska-training.ics", content: trainingIcs(b, `${siteUrl()}/me/bookings/${b.id}`), contentType: "text/calendar; charset=utf-8; method=PUBLISH" }],
@@ -400,7 +400,7 @@ export async function editBooking(fd: FormData) {
     location: String(fd.get("location") ?? "").trim() || null,
     content: String(fd.get("content") ?? "").replace(/\r\n/g, "\n").trim(),
   };
-  if (!next.program_name || !next.content) return { error: "Program name and content can't be empty." };
+  if (!next.program_name) return { error: "The program name can't be empty." };
   if (!Number.isInteger(next.day_number) || next.day_number < 1) return { error: "The day number must be 1 or more." };
   if (!DATE.test(next.date) || !TIME.test(next.start_time) || !TIME.test(next.end_time) || next.end_time <= next.start_time) return { error: "Check the date and time." };
   if (!slotsFor(next.start_time, next.end_time).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
@@ -412,7 +412,7 @@ export async function editBooking(fd: FormData) {
     ["Date", fmtDate(b.date), fmtDate(next.date)],
     ["Time", `${fmtTime(b.start_time)} – ${fmtTime(b.end_time)}`, `${fmtTime(next.start_time)} – ${fmtTime(next.end_time)}`],
     ["Location", b.location ?? "—", next.location ?? "—"],
-    ["Content", b.content, next.content],
+    ["Content", b.content || "—", next.content || "—"],
   ];
   const changes = fields.filter(([, a, c]) => a !== c).map(([field, from, to]) => ({ field, from, to }));
   if (!changes.length) return { ok: "Nothing changed." };

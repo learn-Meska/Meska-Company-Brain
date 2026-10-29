@@ -1,4 +1,4 @@
-export default function AuthLayout({ children, heading = "Meska Training Center" }: { children: React.ReactNode; heading?: string }) {
+export default function AuthLayout({ children, heading = "Meska Company Brain" }: { children: React.ReactNode; heading?: string }) {
   return (
     <div className="brand-gradient relative grid min-h-screen place-items-center overflow-hidden px-4 py-10">
       <div className="brand-grid pointer-events-none absolute inset-0" />

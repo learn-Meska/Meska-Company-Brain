@@ -45,7 +45,7 @@ export function trainingIcs(b: B, link: string, cancelled = false) {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Meska AI//Meska Training Center//EN",
+    "PRODID:-//Meska AI//Meska Company Brain//EN",
     "CALSCALE:GREGORIAN",
     cancelled ? "METHOD:CANCEL" : "METHOD:PUBLISH",
     "BEGIN:VEVENT",
@@ -58,7 +58,7 @@ export function trainingIcs(b: B, link: string, cancelled = false) {
     `DTEND:${stamp(end)}`,
     `SUMMARY:${esc(trainerTitle(b))}`,
     `LOCATION:${esc(b.location ?? "")}`,
-    `DESCRIPTION:${esc(`${b.content}\n\nDetails: ${link}`)}`,
+    `DESCRIPTION:${esc(`${b.content ? `${b.content}\n\n` : ""}Details: ${link}`)}`,
     `URL:${link}`,
     "BEGIN:VALARM",
     "TRIGGER:-PT12H",
@@ -78,7 +78,7 @@ export function googleCalendarUrl(b: B, link: string) {
     action: "TEMPLATE",
     text: trainerTitle(b),
     dates: `${stamp(start)}/${stamp(end)}`,
-    details: `${b.content}\n\nDetails: ${link}`,
+    details: `${b.content ? `${b.content}\n\n` : ""}Details: ${link}`,
     location: b.location ?? "",
   });
   return `https://calendar.google.com/calendar/render?${p.toString()}`;

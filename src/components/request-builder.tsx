@@ -20,7 +20,7 @@ import {
 } from "@/lib/deal";
 
 type Opt = { id: string; name: string };
-type Day = { key: number; date: string; start: string; end: string; location: string; content: string; trainerId: string };
+type Day = { key: number; date: string; start: string; end: string; location: string; trainerId: string };
 type TrainerOpt = { id: string; full_name: string; title: string | null };
 
 const PRESETS = [
@@ -51,7 +51,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
   const nDays = Number(dealDays);
   const valueError = valuePerDay || dealDays ? dealValueError(perDay, nDays) : null;
   const [same, setSame] = useState(false);
-  const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", content: "", trainerId: "" }]);
+  const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", trainerId: "" }]);
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
   // trainers free at each day's time who match the industry
@@ -77,7 +77,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
 
   function addDay() {
     const last = days[days.length - 1];
-    setDays([...days, { ...last, key: last.key + 1, date: last.date ? addDays(last.date, 1) : "", content: "", trainerId: same ? last.trainerId : "" }]);
+    setDays([...days, { ...last, key: last.key + 1, date: last.date ? addDays(last.date, 1) : "", trainerId: same ? last.trainerId : "" }]);
   }
   async function readParticipants(file: File | undefined) {
     if (!file) return;
@@ -123,7 +123,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
         value_per_day: perDay,
         deal_days: nDays,
         same_trainer: same,
-        days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end, location: d.location, content: d.content, trainer_id: d.trainerId || undefined })),
+        days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end, location: d.location, trainer_id: d.trainerId || undefined })),
       }).catch(() => ({ error: "That didn't go through. Check your connection and try again.", ids: undefined }));
       if (r.error) return setErr(r.error);
       router.push(r.ids?.length === 1 ? `/bookings/${r.ids[0]}?requested=1` : "/bookings?requested=1");
@@ -250,7 +250,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           <div>
             <div className="eyebrow">Step 4</div>
             <h2 className="h2">Training days</h2>
-            <p className="text-sm text-muted">Add each day with its own content{trainerRequired ? ", then choose the trainer" : ""}.</p>
+            <p className="text-sm text-muted">Add each day with its date, time and location{trainerRequired ? ", then choose the trainer" : ""}.</p>
           </div>
           <button type="button" onClick={addDay} className="btn-ghost">+ Add another day</button>
         </div>
@@ -289,7 +289,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                 </button>
               ))}
             </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="mt-3 max-w-md">
               <div>
                 <label className="label" htmlFor={`t${d.key}`}>Trainer{trainerRequired ? " *" : ""}</label>
                 {!ready ? (
@@ -315,10 +315,6 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                     ))}
                   </select>
                 )}
-              </div>
-              <div>
-                <label className="label" htmlFor={`c${d.key}`}>Content to be delivered on this day *</label>
-                <textarea id={`c${d.key}`} className="input" rows={3} placeholder="Objectives, topics and client notes." value={d.content} onChange={(e) => patch(d.key, { content: e.target.value })} />
               </div>
             </div>
           </div>

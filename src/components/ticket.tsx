@@ -90,10 +90,13 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
           </div>
         ))}
       </dl>
-      <div className="callout">
-        <div className="eyebrow mb-1">Content to be delivered</div>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{b.content}</p>
-      </div>
+      {/* New deals don't ask for per-day content; it shows only once the booking team adds some */}
+      {b.content && (
+        <div className="callout">
+          <div className="eyebrow mb-1">Content to be delivered</div>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed">{b.content}</p>
+        </div>
+      )}
       {(b.approver_comment || b.trainer_comment) && (
         <div className="grid gap-2 sm:grid-cols-2">
           {b.approver_comment && <div className="rounded-xl bg-surface2 p-3 text-sm"><div className="label">Approver comment</div>{b.approver_comment}</div>}

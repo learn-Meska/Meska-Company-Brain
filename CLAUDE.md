@@ -15,7 +15,7 @@ With `GH_TOKEN` exported, `gh` commands (PRs, API calls) also act as `learn-Mesk
 
 ## What this is
 
-Meska Training Center (package name `meska-company-brain`) is an internal app for Meska AI's Programs, Learning & Delivery team. Growth staff request multi-day trainings, booking managers assign freelance trainers who are available and match the request, trainers confirm or decline, and participants leave anonymous feedback through a QR code. That feedback feeds each trainer's score and tier.
+Meska Company Brain (package name `meska-company-brain`) is an internal app for Meska AI's Programs, Learning & Delivery team. Growth staff request multi-day trainings, booking managers assign freelance trainers who are available and match the request, trainers confirm or decline, and participants leave anonymous feedback through a QR code. That feedback feeds each trainer's score and tier.
 
 Stack: Next.js 16 App Router (React 19, Turbopack, Tailwind v4), Supabase (Postgres, Auth, Storage), Gmail SMTP through nodemailer, deployed on Vercel.
 

@@ -171,7 +171,8 @@ export const fmtAmount = (n: number) => n.toLocaleString("en-US", { maximumFract
 
 export type ProposalFile = { path: string; name: string; size: number };
 
-export type NewRequestDay = { day_number: number; date: string; start: string; end: string; location: string; content: string; trainer_id?: string };
+// A New deal no longer asks for per-day content; bookings.content is saved as "" for these days.
+export type NewRequestDay = { day_number: number; date: string; start: string; end: string; location: string; trainer_id?: string };
 
 export type NewRequest = {
   program_name: string;
@@ -221,7 +222,6 @@ export function requestError(input: NewRequest, who: { role: string; userId: str
     if (e) return e;
     if (d.date < who.today) return `Day ${d.day_number}: ${PAST_DATE}`;
     if (d.trainer_id && !UUID.test(d.trainer_id)) return `Day ${d.day_number}: pick the trainer again.`;
-    if (typeof d.content !== "string" || !d.content.trim()) return `Describe the content for Day ${d.day_number}.`;
     if (typeof d.location !== "string") return `Check the location for Day ${d.day_number}.`;
   }
   // Growth must choose the trainer for every day; admins and booking managers may leave days to assign later.

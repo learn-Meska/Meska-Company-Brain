@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/logo-horizontal-white-text.png" alt="Meska AI" className="h-7 w-auto lg:h-8" />
-          <div className="mt-1 hidden text-[10px] font-medium uppercase tracking-[0.25em] text-[#93C5FD] lg:block">Training Center</div>
+          <div className="mt-1 hidden text-[10px] font-medium uppercase tracking-[0.25em] text-[#93C5FD] lg:block">Company Brain</div>
         </div>
         <Nav items={items} />
         {canSwitch && (

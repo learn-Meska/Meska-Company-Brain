@@ -112,7 +112,7 @@ export function emailLayout(opts: {
 <tr><td style="background:linear-gradient(150deg,#0B1E3A,#14315E 45%,#1D4ED8);padding:22px 28px;color:#fff">
 <img src="cid:meska-logo" alt="Meska AI" width="150" style="display:block;height:auto;border:0;margin-bottom:14px">
 <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#93C5FD;font-weight:500">Programs, Learning &amp; Delivery</div>
-<div style="font-size:20px;font-weight:700;margin-top:4px">Meska Training Center</div></td></tr>
+<div style="font-size:20px;font-weight:700;margin-top:4px">Meska Company Brain</div></td></tr>
 <tr><td style="padding:26px 28px">
 <p style="margin:0 0 12px;font-size:15px">${esc(opts.greeting)}</p>
 <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#33415C">${opts.intro}</p>
@@ -122,7 +122,7 @@ ${opts.extra ?? ""}
 ${opts.button ? `<p style="margin:6px 0 18px"><a href="${opts.button.url}" style="display:inline-block;background:#2563EB;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px">${esc(opts.button.label)}</a></p>` : ""}
 ${opts.footnote ? `<p style="margin:0;font-size:12.5px;color:#5E6B82;line-height:1.6">${opts.footnote}</p>` : ""}
 </td></tr>
-<tr><td style="padding:16px 28px;background:#F5F7FC;font-size:11.5px;color:#97A3B8">Sent by Meska Training Center.<br>© 2026 Meska AI — Confidential</td></tr>
+<tr><td style="padding:16px 28px;background:#F5F7FC;font-size:11.5px;color:#97A3B8">Sent by Meska Company Brain.<br>© 2026 Meska AI — Confidential</td></tr>
 </table></td></tr></table></body></html>`;
 }
 

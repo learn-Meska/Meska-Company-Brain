@@ -18,7 +18,7 @@ export function validRequest(over: Partial<NewRequest> = {}): NewRequest {
     value_per_day: 100000,
     deal_days: 5,
     same_trainer: false,
-    days: [{ day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: "Cairo", content: "Intro to AI", trainer_id: TRAINER }],
+    days: [{ day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: "Cairo", trainer_id: TRAINER }],
     ...over,
   };
 }

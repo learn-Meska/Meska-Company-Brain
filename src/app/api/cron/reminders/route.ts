@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     await notify([await trainerRecipient(b)], {
       title: `Reminder: please confirm ${trainerTitle(b)}`,
       link: `/me/bookings/${b.id}`,
-      email: { subject: `Reminder: please confirm your training on ${fmtDate(b.date, { day: "numeric", month: "long" })}`, intro: "You haven't confirmed this assignment yet.", rows: bookingRows(b, true), content: b.content, button: "Confirm the assignment" },
+      email: { subject: `Reminder: please confirm your training on ${fmtDate(b.date, { day: "numeric", month: "long" })}`, intro: "You haven't confirmed this assignment yet.", rows: bookingRows(b, true), content: b.content || undefined, button: "Confirm the assignment" },
     });
     out.unconfirmed++;
   }

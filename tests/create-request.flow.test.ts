@@ -72,8 +72,8 @@ describe("New deal: happy path", () => {
   it("Growth: saves deal → participants → bookings (golden writes) and notifies", async () => {
     const input = await uploadedRequest({
       days: [
-        { day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: " Cairo ", content: "Intro\r\nto AI", trainer_id: TRAINER },
-        { day_number: 2, date: "2026-11-11", start: "18:00", end: "22:00", location: "", content: "Prompting", trainer_id: TRAINER },
+        { day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: " Cairo ", trainer_id: TRAINER },
+        { day_number: 2, date: "2026-11-11", start: "18:00", end: "22:00", location: "", trainer_id: TRAINER },
       ],
       same_trainer: true,
     });
@@ -87,6 +87,8 @@ describe("New deal: happy path", () => {
     expect(new Set(bookings.map((b) => b.deal_id))).toEqual(new Set([fakeId(1)]));
     expect(bookings.every((b) => b.industry_id === INDUSTRY && b.audience_id === null && b.function_id === null)).toBe(true);
     expect(bookings.map((b) => b.status)).toEqual(["awaiting_trainer", "awaiting_trainer"]);
+    // no per-day content is asked for any more; the NOT NULL column gets ""
+    expect(bookings.map((b) => b.content)).toEqual(["", ""]);
 
     // trainer emailed once per day, booking team once; the trainer copy never carries deal or contact details
     expect(h.notified.map((n) => n.title)).toEqual([

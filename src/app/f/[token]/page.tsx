@@ -5,7 +5,7 @@ import { FeedbackForm } from "@/components/feedback-form";
 import { db } from "@/lib/supabase";
 import { feedbackWindow, fmtDate, isFuture, isPast } from "@/lib/format";
 
-export const metadata: Metadata = { title: "Training feedback · Meska Training Center" };
+export const metadata: Metadata = { title: "Training feedback · Meska Company Brain" };
 
 export default async function FeedbackPage({ params }: PageProps<"/f/[token]">) {
   const { token } = await params;

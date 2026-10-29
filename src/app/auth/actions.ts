@@ -53,7 +53,7 @@ export async function signOut() {
   redirect("/login");
 }
 
-const RESET_SUBJECT = "Reset your Meska Training Center password";
+const RESET_SUBJECT = "Reset your Meska Company Brain password";
 
 export async function requestReset(fd: FormData) {
   const email = String(fd.get("email") ?? "").trim().toLowerCase().slice(0, 320);

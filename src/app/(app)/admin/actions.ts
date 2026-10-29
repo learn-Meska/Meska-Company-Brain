@@ -181,10 +181,10 @@ async function sendInvite(email: string, name: string, roleText: string) {
   const link = await accessLink(email, "recovery");
   await sendEmail(
     email,
-    "You're invited to Meska Training Center",
+    "You're invited to Meska Company Brain",
     emailLayout({
       greeting: `Dear ${name.split(" ")[0]},`,
-      intro: `You've been given access to Meska Training Center as <b>${roleText}</b>. Use the button below to set your password and sign in. The link works once; if it expires, use “Forgot your password?” on the sign-in page.`,
+      intro: `You've been given access to Meska Company Brain as <b>${roleText}</b>. Use the button below to set your password and sign in. The link works once; if it expires, use “Forgot your password?” on the sign-in page.`,
       button: { label: "Set my password", url: link },
     }),
   );

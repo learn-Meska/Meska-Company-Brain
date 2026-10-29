@@ -172,7 +172,6 @@ describe("requestError: the whole New deal, step by step", () => {
     ["days", { deal_days: 0 }, /how many days/],
     ["no training days", { days: [] }, /at least one training day/],
     ["past date", { days: [{ ...validRequest().days[0], date: "2026-10-01" }] }, /already passed/],
-    ["content", { days: [{ ...validRequest().days[0], content: " " }] }, /Describe the content/],
     ["trainer id", { days: [{ ...validRequest().days[0], trainer_id: "x" }] }, /pick the trainer again/],
     ["day number", { days: [{ ...validRequest().days[0], day_number: 0 }] }, /day number/],
   ])("refuses a missing or bad %s", (_, over, msg) => {
@@ -183,6 +182,10 @@ describe("requestError: the whole New deal, step by step", () => {
     expect(requestError(allBad, growth)).toBe("Enter the program name.");
     expect(requestError({ ...allBad, program_name: "P" }, growth)).toBe("Pick the industry.");
     expect(requestError({ ...allBad, program_name: "P", industry_id: INDUSTRY }, growth)).toMatch(/participants file/);
+  });
+  it("per-day content is no longer asked for", () => {
+    expect(validRequest().days[0]).not.toHaveProperty("content");
+    expect(requestError(validRequest(), growth)).toBeNull();
   });
   it("survives junk input from a tampered browser", () => {
     expect(requestError(null as never, growth)).toBe("Fill in the request.");
