@@ -2,7 +2,8 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { Dropzone } from "@/components/dropzone";
 import { createProposalUpload, createRequest, requestTrainerOptions } from "@/app/(app)/bookings/actions";
 import {
   dealTotal,
@@ -46,8 +47,6 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
   const [proposalMsg, setProposalMsg] = useState<{ busy?: boolean; error?: string }>({});
   const [valuePerDay, setValuePerDay] = useState("");
   const [dealDays, setDealDays] = useState("");
-  const csvInput = useRef<HTMLInputElement>(null);
-  const proposalInput = useRef<HTMLInputElement>(null);
   const perDay = parseAmount(valuePerDay);
   const nDays = Number(dealDays);
   const valueError = valuePerDay || dealDays ? dealValueError(perDay, nDays) : null;
@@ -90,7 +89,6 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
       const { participants, error } = parseParticipants(await file.text());
       setPeople({ file: file.name, list: participants, error: error ?? "" });
     }
-    if (csvInput.current) csvInput.current.value = "";
   }
 
   async function uploadProposal(file: File | undefined) {
@@ -109,8 +107,6 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
       setProposalMsg({});
     } catch {
       setProposalMsg({ error: "That didn't go through. Check your connection and try again." });
-    } finally {
-      if (proposalInput.current) proposalInput.current.value = "";
     }
   }
 
@@ -181,17 +177,13 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
             ⬇ Download template
           </a>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="btn-ghost cursor-pointer">
-            {people?.list.length ? "Replace participants file" : "Upload participants (.csv) *"}
-            <input ref={csvInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => readParticipants(e.target.files?.[0])} />
-          </label>
-          {people && !people.error && (
-            <span className="text-sm text-good">
-              {people.file}: {people.list.length} {people.list.length === 1 ? "participant" : "participants"}
-            </span>
-          )}
-        </div>
+        <Dropzone
+          title="Choose or drop the participants sheet"
+          hint=".csv — first row is the headers (name, title, department)"
+          accept=".csv,text/csv"
+          file={people && !people.error ? `${people.file} · ${people.list.length} ${people.list.length === 1 ? "participant" : "participants"}` : null}
+          onFile={readParticipants}
+        />
         {people?.error && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{people.file}: {people.error}</p>}
         {people && !people.error && people.list.length > 0 && (
           <div className="overflow-x-auto rounded-xl border border-line">
@@ -226,17 +218,14 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           <h2 className="h2">Proposal &amp; value</h2>
           <p className="text-sm text-muted">Upload the proposal sent to the client (PDF, Word, PowerPoint or Excel), then the value per training day and how many days the deal covers.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="btn-ghost cursor-pointer">
-            {proposalMsg.busy ? "Uploading…" : proposal ? "Replace proposal" : "Upload proposal *"}
-            <input ref={proposalInput} type="file" accept={PROPOSAL_ACCEPT} className="hidden" disabled={proposalMsg.busy} onChange={(e) => uploadProposal(e.target.files?.[0])} />
-          </label>
-          {proposal && !proposalMsg.busy && (
-            <span className="text-sm text-good">
-              ✓ {proposal.name} · {(proposal.size / 1048576).toFixed(1)} MB
-            </span>
-          )}
-        </div>
+        <Dropzone
+          title="Choose or drop the proposal"
+          hint=".pdf, .docx, .pptx or .xlsx — 50 MB at most"
+          accept={PROPOSAL_ACCEPT}
+          busy={proposalMsg.busy}
+          file={proposal ? `${proposal.name} · ${(proposal.size / 1048576).toFixed(1)} MB` : null}
+          onFile={uploadProposal}
+        />
         {proposalMsg.error && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{proposalMsg.error}</p>}
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
