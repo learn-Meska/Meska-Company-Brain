@@ -64,7 +64,10 @@ describe("schema contract", () => {
     for (const { f, text } of trainerPages) {
       expect(text, f).not.toMatch(/deals|deal_participants|DealCard|proposalLink/);
     }
-    // the shared ticket (trainers see it too) must not show the deal either
-    expect(read("src/components/ticket.tsx")).not.toMatch(/deal_id|"deals"|deal_participants|DealCard|proposal/);
+    // the shared ticket (trainers see it too) shows only getDealInfo (company, headcount, days), never the value or proposal
+    const ticket = read("src/components/ticket.tsx");
+    expect(ticket).not.toMatch(/"deals"|deal_participants|DealCard|proposal|value_per_day/);
+    const info = read("src/lib/deal-info.ts");
+    expect(info).not.toMatch(/proposal|value_per_day|select\("[^"]*\b(name|title)\b/);
   });
 });

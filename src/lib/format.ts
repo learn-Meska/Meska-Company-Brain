@@ -103,10 +103,11 @@ export function cairoStart(date: string, time: string) {
   return new Date(wall.getTime() - cairoOffset(first));
 }
 
-// Trainers only learn the program (client) name 2 days before the training.
-export const PROGRAM_REVEAL_HOURS = 48;
-export function programVisible(b: { date: string; start_time: string }, now = Date.now()) {
-  return now >= cairoStart(b.date, b.start_time).getTime() - PROGRAM_REVEAL_HOURS * 3_600_000;
+// Trainers see the program name as soon as they are assigned (it used to be hidden until 2 days before).
+// Kept as one function so every place that shows a program name to a trainer still goes through it.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the argument stays so callers don't change
+export function programVisible(_b?: { date: string; start_time: string }) {
+  return true;
 }
 export function trainerTitle(b: { program_name: string; day_number: number; date: string; start_time: string }) {
   return `${programVisible(b) ? b.program_name : "Meska AI training"} — Day ${b.day_number}`;

@@ -7,14 +7,16 @@ import { fmtNps } from "@/lib/survey";
 import { googleCalendarUrl } from "@/lib/ics";
 import { siteUrl } from "@/lib/email";
 import type { BookingRow } from "@/lib/notify";
+import { getDealInfo } from "@/lib/deal-info";
 
 type Material = { id: string; file_name: string; size_bytes: number | null; created_at: string; kind: string };
 
-// trainerView: the assigned trainer is looking — hide the program until 2 days before, and let them write the brief.
+// trainerView: the assigned trainer is looking — they may write the brief.
 export async function Ticket({ b, canUpload, trainerView = false }: { b: BookingRow; canUpload: boolean; trainerView?: boolean }) {
-  const [{ data: mats }, { data: skills }] = await Promise.all([
+  const [{ data: mats }, { data: skills }, deal] = await Promise.all([
     db().from("booking_materials").select("*").eq("booking_id", b.id).order("created_at"),
     b.skill_ids.length ? db().from("skills").select("name").in("id", b.skill_ids) : Promise.resolve({ data: [] }),
+    getDealInfo(b.deal_id),
   ]);
   const all = (mats ?? []) as Material[];
   const materials = all.filter((m) => m.kind !== "brief");
@@ -28,6 +30,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
   const feedbackUrl = `${siteUrl()}/f/${b.feedback_token}`;
   const closeLabel = win.closes.toLocaleString("en-GB", { timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
   const rows: [string, React.ReactNode][] = [
+    ...(deal?.company ? [["Company", deal.company] as [string, React.ReactNode]] : []),
     ["Date", fmtDate(b.date)],
     ["Time", `${fmtTime(b.start_time)} – ${fmtTime(b.end_time)}`],
     ["Slots", b.slots.map((s) => SLOT_LABEL[s]).join(" + ")],
@@ -44,6 +47,9 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
     ...(b.audience ? [["Audience", b.audience.name] as [string, React.ReactNode]] : []),
     ...(b.func ? [["Function", b.func.name] as [string, React.ReactNode]] : []),
     ["Industry", b.industry?.name],
+    ...(deal && deal.participants
+      ? [["Audience", `${deal.participants} participant${deal.participants > 1 ? "s" : ""}${deal.departments.length ? ` · ${deal.departments.map(([d, n]) => `${d} (${n})`).join(", ")}` : ""}`] as [string, React.ReactNode]]
+      : []),
     ...(b.skill_ids.length ? [["Skills", ((skills ?? []) as { name: string }[]).map((s) => s.name).join(", ") || "—"] as [string, React.ReactNode]] : []),
   ];
   // the client contact is for the Meska team only
@@ -90,6 +96,19 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
           </div>
         ))}
       </dl>
+      {deal && deal.days.length > 1 && (
+        <div>
+          <h2 className="h2 mb-2">Training days ({deal.days.length})</h2>
+          <ul className="space-y-1.5">
+            {deal.days.map((d) => (
+              <li key={d.id} className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm ${d.id === b.id ? "bg-ice font-medium" : "bg-surface2"}`}>
+                <span>Day {d.day_number} · {fmtDate(d.date, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</span>
+                <span className="text-muted">{fmtTime(d.start_time)} – {fmtTime(d.end_time)}{d.location && !/^https?:\/\//.test(d.location) ? ` · ${d.location}` : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/* New deals don't ask for per-day content; it shows only once the booking team adds some */}
       {b.content && (
         <div className="callout">
