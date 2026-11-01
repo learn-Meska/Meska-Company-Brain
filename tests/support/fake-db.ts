@@ -95,7 +95,7 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
           // ON DELETE CASCADE / SET NULL as in the real schema
           if (t === "deals") {
             const ids = hit.map((r) => r.id);
-            tables.deal_participants = rows("deal_participants").filter((p) => !ids.includes(p.deal_id));
+            tables.deal_audience = rows("deal_audience").filter((p) => !ids.includes(p.deal_id));
             for (const b of rows("bookings")) if (ids.includes(b.deal_id)) b.deal_id = null;
           }
         } else for (const r of hit) Object.assign(r, this.payload);
@@ -103,6 +103,8 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
       }
       let found = rows(t).filter((r) => this.match(r));
       if (t === "bookings") found = found.map((b) => withJoins(b));
+      // deal_audience embeds its lookup: select("lookup_id, lookups(id, kind, name, sort)")
+      if (t === "deal_audience") found = found.map((r) => ({ ...r, lookups: rows("lookups").find((l) => l.id === r.lookup_id) ?? null }));
       if (this.one) return { data: found[0] ?? null, error: null };
       return { data: found, error: null, count: found.length };
     }

@@ -2,87 +2,95 @@
 // fix the code, or, when the behaviour change is intended, update the golden file with `npm run test:update`
 // and say why in the commit.
 
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  audienceError,
+  audienceRows,
   contactError,
   dayError,
   dealTotal,
   dealValueError,
+  departmentMatches,
+  fitsLevels,
   parseAmount,
-  parseCsv,
-  parseParticipants,
-  participantsCsv,
-  participantsError,
-  PARTICIPANTS_TEMPLATE_CSV,
   proposalFileError,
   proposalPathError,
+  rankByDepartments,
   requestError,
+  splitLabel,
+  type Audience,
   type NewRequest,
 } from "@/lib/deal";
-import { validRequest } from "./support/requests";
+import { DEPT_FIN, DEPT_HR, LEVEL_MID, LEVEL_SENIOR, validRequest } from "./support/requests";
 import { slotsFor } from "@/lib/format";
-
-const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
 
 const USER = "11111111-1111-4111-8111-111111111111";
 const INDUSTRY = "22222222-2222-4222-8222-222222222222";
 const TODAY = "2026-11-01";
 
 const growth = { role: "growth", userId: USER, today: TODAY };
+const audience = (over: Partial<Audience> = {}): Audience => ({ ...validRequest().audience, ...over });
 
-describe("participants template (golden)", () => {
-  it("is exactly the file Growth downloads", async () => {
-    await expect(PARTICIPANTS_TEMPLATE_CSV).toMatchFileSnapshot("./golden/participants-template.csv");
+describe("audience (step 2): seniority levels, departments, headcount", () => {
+  it("a normal audience passes", () => expect(audienceError(audience())).toBeNull());
+  it("“Mixed / all departments” replaces picking departments", () => {
+    expect(audienceError(audience({ department_ids: [], all_departments: true }))).toBeNull();
+    expect(audienceError(audience({ department_ids: [DEPT_HR], all_departments: true }))).toMatch(/not both/);
   });
-  it("starts with a UTF-8 BOM and the three columns in order", () => {
-    expect(PARTICIPANTS_TEMPLATE_CSV.charCodeAt(0)).toBe(0xfeff);
-    expect(parseCsv(PARTICIPANTS_TEMPLATE_CSV)[0]).toEqual(["name", "title", "department"]);
+  it.each<[string, Partial<Audience> | undefined, RegExp]>([
+    ["no audience", undefined, /Pick the audience/],
+    ["no level", { level_ids: [] }, /at least one seniority level/],
+    ["a bad level id", { level_ids: ["x"] }, /at least one seniority level/],
+    ["the same level twice", { level_ids: [LEVEL_MID, LEVEL_MID] }, /at least one seniority level/],
+    ["no department", { department_ids: [] }, /at least one department/],
+    ["a bad department id", { department_ids: ["nope"] }, /departments again/],
+    ["a non-boolean flag", { all_departments: "yes" as never }, /departments again/],
+    ["no headcount", { participant_count: 0 }, /number of participants/],
+    ["a fractional headcount", { participant_count: 2.5 }, /number of participants/],
+    ["too many people", { participant_count: 10_001 }, /number of participants/],
+  ])("refuses %s", (_, over, msg) => {
+    expect(audienceError(over === undefined ? undefined : audience(over))).toMatch(msg);
   });
-  it("the template itself is rejected until participants are added", () => {
-    expect(parseParticipants(PARTICIPANTS_TEMPLATE_CSV).error).toMatch(/no participants/);
+  it("saves one deal_audience row per picked level and department", () => {
+    expect(audienceRows("D", audience({ level_ids: [LEVEL_MID, LEVEL_SENIOR], department_ids: [DEPT_HR] }))).toEqual([
+      { deal_id: "D", lookup_id: LEVEL_MID },
+      { deal_id: "D", lookup_id: LEVEL_SENIOR },
+      { deal_id: "D", lookup_id: DEPT_HR },
+    ]);
+  });
+  it("splits the admin list's long level names for compact chips", () => {
+    expect(splitLabel("Junior Level (Entry-Level / Associates)")).toEqual({ main: "Junior Level", sub: "Entry-Level / Associates" });
+    expect(splitLabel("C-Level (Executives)")).toEqual({ main: "C-Level", sub: "Executives" });
+    expect(splitLabel("HR")).toEqual({ main: "HR", sub: "" });
   });
 });
 
-describe("participants CSV parsing", () => {
-  it("reads a filled template: quotes, commas, Arabic, blank lines, CRLF (golden)", async () => {
-    const r = parseParticipants(fixture("participants-filled.csv"));
-    expect(r.error).toBeNull();
-    await expect(JSON.stringify(r.participants, null, 2) + "\n").toMatchFileSnapshot("./golden/participants-filled.json");
+describe("matching trainers to the audience", () => {
+  const trainer = (tags: string[], tierAudience: string[] | null = null, total = 50) => ({ lookups: tags.map((id) => ({ id })), tier: tierAudience ? { audience_ids: tierAudience } : null, total });
+  it("seniority filters: the trainer needs every picked level", () => {
+    expect(fitsLevels(trainer([LEVEL_MID, LEVEL_SENIOR]), [LEVEL_MID, LEVEL_SENIOR])).toBe(true);
+    expect(fitsLevels(trainer([LEVEL_MID]), [LEVEL_MID, LEVEL_SENIOR])).toBe(false);
+    expect(fitsLevels(trainer([]), [LEVEL_MID])).toBe(false);
   });
-  it("accepts semicolon files (Excel in some regions) and columns in any order", () => {
-    const r = parseParticipants("Department;Name;Title\nSales;Omar;Lead\n");
-    expect(r).toEqual({ participants: [{ name: "Omar", title: "Lead", department: "Sales" }], error: null });
+  it("seniority filters: the trainer's tier must allow every picked level (a tier without rules allows all)", () => {
+    expect(fitsLevels(trainer([LEVEL_MID, LEVEL_SENIOR], [LEVEL_MID]), [LEVEL_MID, LEVEL_SENIOR])).toBe(false);
+    expect(fitsLevels(trainer([LEVEL_MID, LEVEL_SENIOR], [LEVEL_MID, LEVEL_SENIOR]), [LEVEL_MID, LEVEL_SENIOR])).toBe(true);
+    expect(fitsLevels(trainer([LEVEL_MID], []), [LEVEL_MID])).toBe(true);
   });
-  it.each([
-    ["", /empty/],
-    ["name,title\nOmar,Lead\n", /missing: department/],
-    ["name,title,department\n,Lead,Sales\n", /Row 2: the name is missing/],
-    [`name,title,department\nA,${"x".repeat(201)},B\n`, /longer than 200/],
-    ["name,title,department\n" + "P,T,D\n".repeat(501), /at most 500/],
-  ])("rejects %#", (csv, msg) => {
-    const r = parseParticipants(csv);
-    expect(r.participants).toEqual([]);
-    expect(r.error).toMatch(msg);
-  });
-  it("round-trips through the participant export and defuses formulas", () => {
-    const list = [
-      { name: "=HYPERLINK(1)", title: "Lead, Sales", department: null },
-      { name: 'Mai "M"', title: null, department: "Ops" },
-    ];
-    const csv = participantsCsv(list);
-    expect(csv).toContain("'=HYPERLINK(1)");
-    expect(parseParticipants(csv).participants).toEqual([
-      { name: "'=HYPERLINK(1)", title: "Lead, Sales", department: "" },
-      { name: 'Mai "M"', title: "", department: "Ops" },
+  it("departments rank, never filter: more departments covered first, then the score", () => {
+    const a = { ...trainer([DEPT_HR], null, 90), id: "a" };
+    const b = { ...trainer([DEPT_HR, DEPT_FIN], null, 40), id: "b" };
+    const c = { ...trainer([], null, 95), id: "c" };
+    const d = { ...trainer([DEPT_HR], null, 70), id: "d" };
+    expect(departmentMatches(b, [DEPT_HR, DEPT_FIN])).toBe(2);
+    expect(rankByDepartments([a, b, c, d], [DEPT_HR, DEPT_FIN]).map((t) => [t.id, t.departments])).toEqual([
+      ["b", 2],
+      ["a", 1],
+      ["d", 1],
+      ["c", 0],
     ]);
-  });
-  it("server re-check refuses anything the browser could have tampered with", () => {
-    expect(participantsError([])).toMatch(/Upload the participants/);
-    expect(participantsError("x")).toMatch(/Upload the participants/);
-    expect(participantsError([{ name: "  " }])).toMatch(/name is missing/);
-    expect(participantsError([{ name: "A", title: 5 }])).toMatch(/not valid/);
-    expect(participantsError([{ name: "A", title: "B", department: "C" }])).toBeNull();
+    // with no departments picked ("Mixed / all"), the order is just the score
+    expect(rankByDepartments([a, b, c, d], []).map((t) => t.id)).toEqual(["c", "a", "d", "b"]);
   });
 });
 
@@ -161,11 +169,12 @@ describe("requestError: the whole New deal, step by step", () => {
     expect(requestError(noTrainer, { ...growth, role: "admin" })).toBeNull();
   });
   it.each<[string, Partial<NewRequest>, RegExp]>([
+    ["company name", { company_name: "  " }, /company name/],
     ["program name", { program_name: "  " }, /program name/],
     ["industry", { industry_id: "" }, /industry/],
     ["industry id format", { industry_id: "not-a-uuid" }, /industry/],
     ["contact", { contact: { name: "A", email: "x", mobile: "0100000000" } }, /email/],
-    ["participants", { participants: [] }, /participants file/],
+    ["audience", { audience: { ...validRequest().audience, level_ids: [] } }, /seniority level/],
     ["proposal", { proposal: undefined as never }, /Upload the proposal/],
     ["someone else's proposal", { proposal: { path: "999/x.pdf", name: "x.pdf", size: 1 } }, /again/],
     ["value", { value_per_day: 0 }, /value per training day/],
@@ -178,10 +187,11 @@ describe("requestError: the whole New deal, step by step", () => {
     expect(requestError(validRequest(over), growth)).toMatch(msg);
   });
   it("checks the steps in the order the form shows them", () => {
-    const allBad = validRequest({ program_name: "", industry_id: "", participants: [], value_per_day: 0, days: [] });
-    expect(requestError(allBad, growth)).toBe("Enter the program name.");
-    expect(requestError({ ...allBad, program_name: "P" }, growth)).toBe("Pick the industry.");
-    expect(requestError({ ...allBad, program_name: "P", industry_id: INDUSTRY }, growth)).toMatch(/participants file/);
+    const allBad = validRequest({ company_name: "", program_name: "", industry_id: "", audience: { ...validRequest().audience, participant_count: 0 }, value_per_day: 0, days: [] });
+    expect(requestError(allBad, growth)).toBe("Enter the company name.");
+    expect(requestError({ ...allBad, company_name: "C" }, growth)).toBe("Enter the program name.");
+    expect(requestError({ ...allBad, company_name: "C", program_name: "P" }, growth)).toBe("Pick the industry.");
+    expect(requestError({ ...allBad, company_name: "C", program_name: "P", industry_id: INDUSTRY }, growth)).toMatch(/number of participants/);
   });
   it("per-day content is no longer asked for", () => {
     expect(validRequest().days[0]).not.toHaveProperty("content");
@@ -189,6 +199,6 @@ describe("requestError: the whole New deal, step by step", () => {
   });
   it("survives junk input from a tampered browser", () => {
     expect(requestError(null as never, growth)).toBe("Fill in the request.");
-    expect(requestError({} as never, growth)).toBe("Enter the program name.");
+    expect(requestError({} as never, growth)).toBe("Enter the company name.");
   });
 });

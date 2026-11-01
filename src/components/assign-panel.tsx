@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { assignTrainer, requestCandidates } from "@/app/(app)/bookings/actions";
 
-type Cand = { id: string; full_name: string; total: number; tier: { name: string; color: string } | null; feedback: number | null; delivered: number };
+// departments: for a New deal, how many of its picked departments the trainer covers (they're ranked by it)
+type Cand = { id: string; full_name: string; total: number; tier: { name: string; color: string } | null; feedback: number | null; delivered: number; departments: { matched: number; of: number } | null };
 type Day = { id: string; day_number: number; date: string; start: string; end: string; matches: Cand[] };
 
 const fmt = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
@@ -25,6 +26,11 @@ function Row({ c, checked, onPick, name }: { c: Cand; checked: boolean; onPick: 
         </div>
         <div className="text-xs text-muted">
           Score <b className="text-ink">{c.total}</b> · Feedback <b className="text-ink">{c.feedback?.toFixed(2) ?? "—"}</b>/5 · <b className="text-ink">{c.delivered}</b> delivered
+          {c.departments && (
+            <>
+              {" "}· <b className="text-ink">{c.departments.matched}</b> of {c.departments.of} departments
+            </>
+          )}
         </div>
       </div>
       <Link href={`/trainers/${c.id}`} target="_blank" className="text-xs text-blue hover:underline" onClick={(e) => e.stopPropagation()}>

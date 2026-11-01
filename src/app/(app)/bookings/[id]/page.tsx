@@ -41,7 +41,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
       )}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <Ticket b={b} canUpload={me.role === "admin" && b.status !== "cancelled"} />
-      {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} />}
+      {b.deal_id && <DealCard dealId={b.deal_id} />}
 
       {ACTIVE_STATUSES.includes(b.status) && (canBook(me) || b.created_by === me.id) && (
         <section className="card">

@@ -24,25 +24,37 @@ const code = sourceFiles("src/").map((f) => ({ f, text: read(f) }));
 function selectedColumns(table: string) {
   const out = new Set<string>();
   const re = new RegExp(`from\\("${table}"\\)\\s*\\.select\\("([^"]+)"`, "g");
-  for (const { text } of code) for (const m of text.matchAll(re)) for (const c of m[1].split(",")) if (!c.includes("(")) out.add(c.trim());
+  for (const { text } of code) for (const m of text.matchAll(re)) for (const c of m[1].replace(/[\w:!]+\([^)]*\)/g, "").split(",")) out.add(c.trim());
   return [...out].filter((c) => c && c !== "*");
 }
 
 describe("schema contract", () => {
-  it.each(["deals", "deal_participants"])("the migration creates every %s column the app relies on", (table) => {
+  // columns the migrations end up with: create table + "add column if not exists", minus dropped tables
+  function migratedColumns(table: string) {
+    if (new RegExp(`drop table if exists public\\.${table};`).test(migrations)) return [];
     const body = migrations.match(new RegExp(`create table if not exists public\\.${table} \\(([\\s\\S]*?)\\n\\);`))?.[1] ?? "";
-    const declared = body
-      .split("\n")
-      .map((l) => l.trim().match(/^([a-z_]+)\s+(uuid|text|integer|bigint|numeric|timestamptz|boolean)/)?.[1])
-      .filter(Boolean);
-    expect(declared.sort()).toEqual([...schema[table]].sort());
+    const created = body.split("\n").map((l) => l.trim().match(/^([a-z_]+)\s+(uuid|text|integer|bigint|numeric|timestamptz|boolean)/)?.[1]);
+    const added = [...migrations.matchAll(new RegExp(`alter table public\\.${table} add column if not exists ([a-z_]+)`, "g"))].map((m) => m[1]);
+    return [...created, ...added].filter((c): c is string => !!c);
+  }
+
+  it.each(["deals", "deal_audience"])("the migrations create every %s column the app relies on", (table) => {
+    expect(migratedColumns(table).sort()).toEqual([...schema[table]].sort());
   });
 
-  it("the migration links bookings to deals and creates the proposals bucket", () => {
+  it("the CSV participants table is gone and nothing uses it", () => {
+    expect(migrations).toMatch(/drop table if exists public\.deal_participants;/);
+    expect(schema.deal_participants).toBeUndefined();
+    for (const { f, text } of code) expect(text, f).not.toMatch(/deal_participants/);
+  });
+
+  it("the migrations link bookings to deals, protect the new tables and create the proposals bucket", () => {
     expect(migrations).toMatch(/alter table public\.bookings add column if not exists deal_id uuid references public\.deals \(id\) on delete set null/);
     expect(migrations).toMatch(/'proposals', 'proposals', false/);
     expect(migrations).toMatch(/alter table public\.deals enable row level security/);
-    expect(migrations).toMatch(/alter table public\.deal_participants enable row level security/);
+    expect(migrations).toMatch(/alter table public\.deal_audience enable row level security/);
+    expect(migrations).toMatch(/deal_id uuid not null references public\.deals \(id\) on delete cascade/);
+    expect(migrations).toMatch(/lookup_id uuid not null references public\.lookups \(id\)/);
   });
 
   it("every column createRequest writes exists (golden writes vs schema)", () => {
@@ -53,16 +65,15 @@ describe("schema contract", () => {
     }
   });
 
-  it.each(["deals", "deal_participants", "bookings"])("every column the code selects from %s exists", (table) => {
+  it.each(["deals", "deal_audience", "bookings"])("every column the code selects from %s exists", (table) => {
     for (const c of selectedColumns(table)) expect(schema[table], `${table}.${c}`).toContain(c);
   });
 
-  it("deal data is never read on trainer pages", () => {
+  it("the commercial side of a deal is never read on trainer pages", () => {
     const trainerPages = code.filter(({ f }) => f.replace(/\\/g, "/").includes("/me/"));
-    for (const { f, text } of trainerPages) {
-      expect(text, f).not.toMatch(/deals|deal_participants|DealCard|proposalLink/);
-    }
-    // the shared ticket (trainers see it too) must not show the deal either
-    expect(read("src/components/ticket.tsx")).not.toMatch(/deal_id|"deals"|deal_participants|DealCard|proposal/);
+    for (const { f, text } of trainerPages) expect(text, f).not.toMatch(/value_per_day|proposal|DealCard/);
+    // the shared ticket (trainers see it too) shows the audience, but never the value or proposal
+    expect(read("src/components/ticket.tsx")).not.toMatch(/value_per_day|proposal|DealCard/);
+    expect(read("src/lib/deal-audience.ts")).not.toMatch(/value_per_day|proposal/);
   });
 });

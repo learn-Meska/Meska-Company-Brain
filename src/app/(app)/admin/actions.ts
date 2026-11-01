@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { mainRole, requireRole, requireSettingsEditor, requireTrainerManager } from "@/lib/auth";
 import { db } from "@/lib/supabase";
-import { emailLayout, sendEmail } from "@/lib/email";
+import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
 import { isUuid } from "@/lib/format";
 import { hasUnprintable } from "@/lib/pdf-text";
 import { accessLink } from "@/lib/access-link";
@@ -72,6 +72,9 @@ export async function deleteLookup(fd: FormData) {
   if (!isUuid(id)) return { error: "Not found." };
   const { count } = await db().from("bookings").select("id", { count: "exact", head: true }).or(`audience_id.eq.${id},function_id.eq.${id},industry_id.eq.${id}`);
   if (count) return { error: `It's used by ${count} booking${count > 1 ? "s" : ""}, so it can't be removed.` };
+  // New deals pick seniority levels and departments from these lists too.
+  const { count: deals } = await db().from("deal_audience").select("deal_id", { count: "exact", head: true }).eq("lookup_id", id);
+  if (deals) return { error: `It's used by ${deals} deal${deals > 1 ? "s" : ""}, so it can't be removed.` };
   // Trainer tags and tier audiences that point at it go with it.
   await db().from("trainer_lookups").delete().eq("lookup_id", id);
   await db().from("tier_audience").delete().eq("lookup_id", id);
@@ -186,6 +189,21 @@ async function sendInvite(email: string, name: string, roleText: string) {
       greeting: `Dear ${name.split(" ")[0]},`,
       intro: `You've been given access to Meska Company Brain as <b>${roleText}</b>. Use the button below to set your password and sign in. The link works once; if it expires, use “Forgot your password?” on the sign-in page.`,
       button: { label: "Set my password", url: link },
+    }),
+  );
+}
+
+// For a login that already has a password (e.g. an admin who is also a trainer): no set-password
+// link, which would only ask them to replace the password they already use.
+async function sendTrainerAccess(email: string, name: string) {
+  await sendEmail(
+    email,
+    "Your trainer profile is ready in Meska Company Brain",
+    emailLayout({
+      greeting: `Dear ${name.split(" ")[0]},`,
+      intro: "Your trainer profile is now linked to your existing Meska Company Brain login. Sign in with your usual email and password, then choose <b>Trainer</b> under “View as” to see your trainings and availability.",
+      button: { label: "Sign in", url: `${siteUrl()}/login` },
+      footnote: "Never set a password, or forgot it? Use “Forgot your password?” on the sign-in page.",
     }),
   );
 }
@@ -437,7 +455,8 @@ export async function inviteTrainer(fd: FormData) {
   if (!t.email) return { error: "Add the trainer's email to the profile first." };
   try {
     // An invited trainer keeps their login; a re-invite only sends a fresh link.
-    const uid = t.user_id ?? (await ensureAuthUser(t.email)).id;
+    const created = t.user_id ? null : await ensureAuthUser(t.email);
+    const uid = t.user_id ?? created!.id;
     if (t.user_id) {
       // Profiles edited before emails moved with the login may point at an old sign-in address.
       const { data: authUser } = await db().auth.admin.getUserById(uid);
@@ -466,6 +485,15 @@ export async function inviteTrainer(fd: FormData) {
     }
     const { error } = await db().from("trainers").update({ user_id: uid, invited_at: new Date().toISOString() }).eq("id", id);
     if (error) return failed("inviteTrainer", error);
+    // Someone who already signs in (a team member, or a trainer who has used their login) keeps their password.
+    const { data: authUser } = await db().auth.admin.getUserById(uid);
+    const hasLogin = !created?.isNew && (!!authUser?.user?.last_sign_in_at || ((existing as { roles: string[] | null } | null)?.roles ?? []).some((r) => (STAFF_ROLES as readonly string[]).includes(r)));
+    if (hasLogin) {
+      await sendTrainerAccess(t.email, t.full_name);
+      await audit(me.id, "trainer_invited", null, { id, email: t.email, existing_login: true });
+      revalidatePath(`/trainers/${id}`);
+      return { ok: `${t.email} already has a login, so no new password is needed. They were emailed to sign in as usual and switch to Trainer view.` };
+    }
     await sendInvite(t.email, t.full_name, "a Meska trainer");
     await audit(me.id, "trainer_invited", null, { id, email: t.email });
   } catch (e) {

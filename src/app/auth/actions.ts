@@ -102,7 +102,8 @@ export async function setPassword(fd: FormData) {
     if (wrong) return { error: wrong.status === 429 ? "Too many attempts. Please wait a few minutes." : "Your current password isn't right." };
   }
   const { error } = await supabase.auth.updateUser({ password });
-  if (error) return { error: error.message };
+  // Keeping the password you already have is fine (e.g. an admin who opened a trainer invite).
+  if (error && error.code !== "same_password") return { error: error.message };
   const u = await getCurrentUser();
   redirect(u ? homeFor(u) : "/login");
 }

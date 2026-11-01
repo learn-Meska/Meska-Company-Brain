@@ -3,25 +3,15 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
+import { AudiencePicker } from "@/components/audience-picker";
 import { Dropzone } from "@/components/dropzone";
 import { createProposalUpload, createRequest, requestTrainerOptions } from "@/app/(app)/bookings/actions";
-import {
-  dealTotal,
-  dealValueError,
-  fmtAmount,
-  parseAmount,
-  parseParticipants,
-  PARTICIPANTS_TEMPLATE_CSV,
-  PARTICIPANTS_TEMPLATE_NAME,
-  PROPOSAL_ACCEPT,
-  proposalFileError,
-  type Participant,
-  type ProposalFile,
-} from "@/lib/deal";
+import { audienceError, dealTotal, dealValueError, fmtAmount, parseAmount, PROPOSAL_ACCEPT, proposalFileError, type Audience, type ProposalFile } from "@/lib/deal";
 
 type Opt = { id: string; name: string };
 type Day = { key: number; date: string; start: string; end: string; location: string; trainerId: string };
-type TrainerOpt = { id: string; full_name: string; title: string | null };
+// departments: how many of the picked departments this trainer covers (the list is ranked by it)
+type TrainerOpt = { id: string; full_name: string; title: string | null; departments: number };
 
 const PRESETS = [
   { label: "Morning 10 AM – 3 PM", start: "10:00", end: "15:00" },
@@ -36,12 +26,12 @@ function addDays(d: string, n: number) {
 }
 
 // trainerRequired: Growth must choose the trainer for every day; booking staff may leave it to assign later.
-export function RequestBuilder({ industries, today, trainerRequired }: { industries: Opt[]; today: string; trainerRequired: boolean }) {
+export function RequestBuilder({ industries, levels, departments, today, trainerRequired }: { industries: Opt[]; levels: Opt[]; departments: Opt[]; today: string; trainerRequired: boolean }) {
   const router = useRouter();
-  const [f, setF] = useState({ program_name: "", industry_id: "" });
+  const [f, setF] = useState({ company_name: "", program_name: "", industry_id: "" });
   const [contact, setContact] = useState({ name: "", email: "", mobile: "" });
-  // Step 2: the participant list read from the uploaded CSV
-  const [people, setPeople] = useState<{ file: string; list: Participant[]; error: string } | null>(null);
+  // Step 2: who the training is for
+  const [audience, setAudience] = useState<Audience>({ level_ids: [], department_ids: [], all_departments: false, participant_count: 0 });
   // Step 3: the proposal (already in storage once uploaded) and the deal value
   const [proposal, setProposal] = useState<ProposalFile | null>(null);
   const [proposalMsg, setProposalMsg] = useState<{ busy?: boolean; error?: string }>({});
@@ -54,16 +44,22 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
   const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", trainerId: "" }]);
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
-  // trainers free at each day's time who match the industry
+  // trainers free at each day's time who match the industry and every picked seniority level, ranked by departments
   const [options, setOptions] = useState<{ query: string; days: TrainerOpt[][] | null; error: string }>({ query: "", days: null, error: "" });
   const patch = (key: number, p: Partial<Day>) => setDays((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d)));
 
-  const ready = !!f.industry_id && days.every((d) => d.date && d.start && d.end);
-  const query = ready ? JSON.stringify([f.industry_id, days.map((d) => [d.date, d.start, d.end])]) : "";
+  const deptCount = audience.all_departments ? 0 : audience.department_ids.length;
+  const ready = !!f.industry_id && audience.level_ids.length > 0 && days.every((d) => d.date && d.start && d.end);
+  const query = ready ? JSON.stringify([f.industry_id, audience.level_ids, audience.department_ids, days.map((d) => [d.date, d.start, d.end])]) : "";
   useEffect(() => {
     if (!query) return;
     const t = setTimeout(async () => {
-      const r = await requestTrainerOptions({ industry_id: f.industry_id, days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end })) });
+      const r = await requestTrainerOptions({
+        industry_id: f.industry_id,
+        level_ids: audience.level_ids,
+        department_ids: audience.department_ids,
+        days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end })),
+      });
       setOptions({ query, days: "days" in r && r.days ? r.days : null, error: r.error ?? "" });
       // drop a pick that no longer fits
       if ("days" in r && r.days) setDays((ds) => ds.map((d, i) => (d.trainerId && !r.days![i]?.some((x) => x.id === d.trainerId) ? { ...d, trainerId: "" } : d)));
@@ -79,18 +75,6 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
     const last = days[days.length - 1];
     setDays([...days, { ...last, key: last.key + 1, date: last.date ? addDays(last.date, 1) : "", trainerId: same ? last.trainerId : "" }]);
   }
-  async function readParticipants(file: File | undefined) {
-    if (!file) return;
-    if (!/\.csv$/i.test(file.name)) {
-      setPeople({ file: file.name, list: [], error: "Upload the participants as a .csv file (use the template)." });
-    } else if (file.size > 2 * 1024 * 1024) {
-      setPeople({ file: file.name, list: [], error: "The participants file is too large (2 MB at most)." });
-    } else {
-      const { participants, error } = parseParticipants(await file.text());
-      setPeople({ file: file.name, list: participants, error: error ?? "" });
-    }
-  }
-
   async function uploadProposal(file: File | undefined) {
     if (!file) return;
     const bad = proposalFileError(file.name, file.size);
@@ -112,13 +96,14 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
 
   function submit() {
     setErr("");
-    if (!people?.list.length) return setErr("Upload the participants file (step 2).");
+    const ae = audienceError(audience);
+    if (ae) return setErr(`${ae} (step 2)`);
     if (!proposal) return setErr("Upload the proposal (step 3).");
     start(async () => {
       const r = await createRequest({
         ...f,
         contact,
-        participants: people.list,
+        audience,
         proposal,
         value_per_day: perDay,
         deal_days: nDays,
@@ -138,6 +123,10 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           <h2 className="h2">The client &amp; program</h2>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="label" htmlFor="company">Company name *</label>
+            <input id="company" className="input" placeholder="e.g. Aman Holding" value={f.company_name} onChange={(e) => setF({ ...f, company_name: e.target.value })} />
+          </div>
           <div>
             <label className="label" htmlFor="program">Program name *</label>
             <input id="program" className="input" placeholder="e.g. Aman Holding HR" value={f.program_name} onChange={(e) => setF({ ...f, program_name: e.target.value })} />
@@ -163,53 +152,12 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
       </section>
 
       <section className="card space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <div className="eyebrow">Step 2</div>
-            <h2 className="h2">Audience</h2>
-            <p className="text-sm text-muted">Download the template, add one participant per row (name, title, department), save it as CSV and upload it.</p>
-          </div>
-          <a
-            className="btn-ghost"
-            download={PARTICIPANTS_TEMPLATE_NAME}
-            href={`data:text/csv;charset=utf-8,${encodeURIComponent(PARTICIPANTS_TEMPLATE_CSV)}`}
-          >
-            ⬇ Download template
-          </a>
+        <div>
+          <div className="eyebrow">Step 2</div>
+          <h2 className="h2">Audience</h2>
+          <p className="text-sm text-muted">Who is the training for? Trainers are matched to the seniority levels; those who know the departments are listed first.</p>
         </div>
-        <Dropzone
-          title="Choose or drop the participants sheet"
-          hint=".csv — first row is the headers (name, title, department)"
-          accept=".csv,text/csv"
-          file={people && !people.error ? `${people.file} · ${people.list.length} ${people.list.length === 1 ? "participant" : "participants"}` : null}
-          onFile={readParticipants}
-        />
-        {people?.error && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{people.file}: {people.error}</p>}
-        {people && !people.error && people.list.length > 0 && (
-          <div className="overflow-x-auto rounded-xl border border-line">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-surface2 text-left text-xs text-muted">
-                  <th className="px-3 py-1.5">#</th>
-                  <th className="px-3 py-1.5">Name</th>
-                  <th className="px-3 py-1.5">Title</th>
-                  <th className="px-3 py-1.5">Department</th>
-                </tr>
-              </thead>
-              <tbody>
-                {people.list.slice(0, 5).map((p, i) => (
-                  <tr key={i} className="border-t border-line">
-                    <td className="px-3 py-1.5 text-muted tabular-nums">{i + 1}</td>
-                    <td className="px-3 py-1.5">{p.name}</td>
-                    <td className="px-3 py-1.5">{p.title || "—"}</td>
-                    <td className="px-3 py-1.5">{p.department || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {people.list.length > 5 && <p className="px-3 py-1.5 text-xs text-muted">…and {people.list.length - 5} more.</p>}
-          </div>
-        )}
+        <AudiencePicker levels={levels} departments={departments} value={audience} onChange={setAudience} />
       </section>
 
       <section className="card space-y-4">
@@ -293,11 +241,11 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
               <div>
                 <label className="label" htmlFor={`t${d.key}`}>Trainer{trainerRequired ? " *" : ""}</label>
                 {!ready ? (
-                  <p className="text-xs text-muted">Pick the industry (step 1) and the date to see the available trainers.</p>
+                  <p className="text-xs text-muted">Pick the industry (step 1), a seniority level (step 2) and the date to see the available trainers.</p>
                 ) : !opts ? (
                   <p className="text-xs text-muted">{options.query === query && options.error ? options.error : "Finding available trainers…"}</p>
                 ) : opts[i].length === 0 ? (
-                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No matching trainer is free at this time. Try another date or time{trainerRequired ? ", or contact the booking team" : ""}.</p>
+                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No trainer for this industry and seniority is free at this time. Try another date or time{trainerRequired ? ", or contact the booking team" : ""}.</p>
                 ) : (
                   <select
                     id={`t${d.key}`}
@@ -311,6 +259,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                       <option key={t.id} value={t.id}>
                         {t.full_name}
                         {t.title ? ` — ${t.title}` : ""}
+                        {deptCount ? ` · ${t.departments} of ${deptCount} departments` : ""}
                       </option>
                     ))}
                   </select>

@@ -42,21 +42,20 @@
   ],
   "deals": [
     "id",
+    "company_name",
     "value_per_day",
     "days",
     "proposal_path",
     "proposal_name",
     "proposal_size",
+    "participant_count",
+    "all_departments",
     "created_by",
     "created_at"
   ],
-  "deal_participants": [
-    "id",
+  "deal_audience": [
     "deal_id",
-    "position",
-    "name",
-    "title",
-    "department"
+    "lookup_id"
   ],
   "buckets": [
     "proposals"
