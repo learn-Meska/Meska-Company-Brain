@@ -4,6 +4,7 @@ import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { createBriefUpload, createMaterialUpload, materialLink, proposalLink, recordBriefFile, recordMaterial, respondBooking, submitBrief } from "@/app/(app)/bookings/actions";
+import { contentLink } from "@/app/(app)/content/actions";
 
 const OFFLINE = { error: "That didn't go through. Check your connection and try again." };
 
@@ -97,14 +98,15 @@ export function MaterialUploader({ bookingId }: { bookingId: string }) {
 }
 
 // kind "proposal": id is the deal id, and the file is the deal's proposal (Meska team only).
-export function DownloadButton({ id, name, kind = "material" }: { id: string; name: string; kind?: "material" | "proposal" }) {
+// kind "content": id is a file the content team uploaded for the deal.
+export function DownloadButton({ id, name, kind = "material" }: { id: string; name: string; kind?: "material" | "proposal" | "content" }) {
   const [err, setErr] = useState("");
   return (
     <button
       className="text-left text-sm font-medium text-blue hover:underline"
       onClick={async () => {
         setErr("");
-        const r = await (kind === "proposal" ? proposalLink(id) : materialLink(id)).catch(() => OFFLINE);
+        const r = await (kind === "proposal" ? proposalLink(id) : kind === "content" ? contentLink(id) : materialLink(id)).catch(() => OFFLINE);
         if ("url" in r && r.url) window.location.href = r.url;
         else setErr(r.error ?? "Couldn't download.");
       }}

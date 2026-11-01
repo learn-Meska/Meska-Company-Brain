@@ -47,6 +47,13 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
       this.filters.push(["eq", k, v]);
       return this;
     }
+    neq(k: string, v: unknown) {
+      this.filters.push(["neq", k, v]);
+      return this;
+    }
+    limit() {
+      return this;
+    }
     is(k: string, v: unknown) {
       this.filters.push(["is", k, v]);
       return this;
@@ -70,7 +77,7 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
       return this;
     }
     private match(r: Row) {
-      return this.filters.every(([op, k, v]) => (op === "in" ? (v as unknown[]).includes(r[k]) : op === "is" ? (r[k] ?? null) === v : r[k] === v));
+      return this.filters.every(([op, k, v]) => (op === "in" ? (v as unknown[]).includes(r[k]) : op === "is" ? (r[k] ?? null) === v : op === "neq" ? r[k] !== v : r[k] === v));
     }
     private exec(): Result {
       const t = this.table;
@@ -134,6 +141,10 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
         createSignedUploadUrl: async (path: string) => {
           storage.add(`${bucket}/${path}`);
           return { data: { token: "upload-token", signedUrl: `https://storage.test/${bucket}/${path}` }, error: null };
+        },
+        remove: async (paths: string[]) => {
+          for (const p of paths) storage.delete(`${bucket}/${p}`);
+          return { data: null, error: null };
         },
         createSignedUrl: async (path: string) =>
           storage.has(`${bucket}/${path}`) ? { data: { signedUrl: `https://storage.test/${bucket}/${path}?signed` }, error: null } : { data: null, error: { message: "Object not found" } },

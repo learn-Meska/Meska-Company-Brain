@@ -7,10 +7,13 @@ import { ViewSwitcher } from "@/components/view-switcher";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const u = await requireUser();
   const items: NavItem[] = [];
-  if (u.role !== "trainer") {
+  if (u.role === "content") {
+    items.push({ href: "/content", label: "Content requests" });
+  } else if (u.role !== "trainer") {
     items.push({ href: "/request", label: u.role === "growth" ? "New deal" : "Request a training" });
     if (canBook(u)) items.push({ href: "/find", label: "Find a trainer" });
     items.push({ href: "/calendar", label: "Calendar" }, { href: "/bookings", label: "All bookings" }, { href: "/trainers", label: "Trainers" });
+    if (u.role === "admin") items.push({ href: "/content", label: "Content requests" });
     if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
     else if (canEditSettings(u)) items.push({ href: "/admin/settings", label: "Scoring & lists" });
   }

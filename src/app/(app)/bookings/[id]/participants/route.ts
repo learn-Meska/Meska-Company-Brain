@@ -7,7 +7,7 @@ import { participantsCsv } from "@/lib/deal";
 export async function GET(_req: NextRequest, ctx: RouteContext<"/bookings/[id]/participants">) {
   const u = await getCurrentUser();
   const { id } = await ctx.params;
-  if (!u || !["admin", "approver", "growth"].includes(u.role)) return new NextResponse("Not found", { status: 404 });
+  if (!u || !["admin", "approver", "growth", "content"].includes(u.role)) return new NextResponse("Not found", { status: 404 });
   const { data: b } = await db().from("bookings").select("deal_id, program_name").eq("id", id).maybeSingle();
   const booking = b as { deal_id: string | null; program_name: string } | null;
   if (!booking?.deal_id) return new NextResponse("Not found", { status: 404 });

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { cache } from "react";
 import { authClient, db } from "./supabase";
 
-export type Role = "admin" | "approver" | "growth" | "trainer";
+export type Role = "admin" | "approver" | "growth" | "content" | "trainer";
 
 export type CurrentUser = {
   id: string;
@@ -19,7 +19,7 @@ export type CurrentUser = {
   views: Role[];
 };
 
-const ROLE_ORDER: Role[] = ["admin", "approver", "growth", "trainer"];
+const ROLE_ORDER: Role[] = ["admin", "approver", "growth", "content", "trainer"];
 // The highest role in the list becomes the main one.
 export const mainRole = (roles: string[]): Role => ROLE_ORDER.find((r) => roles.includes(r)) ?? "trainer";
 
@@ -54,7 +54,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     role,
     views,
     // previewing Growth means no trainer-management rights either
-    can_manage_trainers: role === "growth" || role === "trainer" ? false : base.can_manage_trainers,
+    can_manage_trainers: role === "growth" || role === "content" || role === "trainer" ? false : base.can_manage_trainers,
     real_role: base.role,
     trainer_id: trainerId,
   };
@@ -97,7 +97,7 @@ export async function requireTrainer(): Promise<CurrentUser & { trainer_id: stri
   return u as CurrentUser & { trainer_id: string };
 }
 
-export const ROLE_LABEL: Record<Role, string> = { admin: "Admin", approver: "Booking manager", growth: "Growth", trainer: "Trainer" };
+export const ROLE_LABEL: Record<Role, string> = { admin: "Admin", approver: "Booking manager", growth: "Growth", content: "Content", trainer: "Trainer" };
 
 export const canManageTrainers = (u: CurrentUser) => u.role === "admin" || u.can_manage_trainers;
 // Scoring & lists (skills, filter lists, score categories, tiers, rules): admins and booking managers.
@@ -111,6 +111,8 @@ export async function requireSettingsEditor(): Promise<CurrentUser> {
 // Booking managers (L&D director, Mahmoud) and admins book trainers once a training is confirmed with the client.
 export const canBook = (u: CurrentUser) => u.role === "admin" || u.role === "approver";
 export const isStaff = (u: CurrentUser) => u.role !== "trainer";
+// The content team (and admins) prepare the guide and files for each deal.
+export const canManageContent = (u: CurrentUser) => u.role === "admin" || u.role === "content";
 
 export function homeFor(u: CurrentUser) {
   switch (u.role) {
@@ -120,6 +122,8 @@ export function homeFor(u: CurrentUser) {
       return "/calendar";
     case "growth":
       return "/request";
+    case "content":
+      return "/content";
     default:
       return "/calendar";
   }

@@ -39,7 +39,8 @@ vi.mock("@/lib/notify", async (importOriginal) => {
     audit: async (_by: string, action: string, _booking: string, details: Record<string, unknown>) => void h.audits.push({ action, details }),
     notify: async (to: ({ id: string; email: string | null } | null)[], n: { title: string; email?: { subject: string; rows?: [string, string][] } }) =>
       void h.notified.push({ to: to.map((r) => r?.email ?? "?"), title: n.title, email: n.email && { subject: n.email.subject, rows: n.email.rows } }),
-    usersWithRoles: async () => [{ id: "admin-1", email: "admin@meska.ai", full_name: "Admin" }],
+    usersWithRoles: async (...roles: string[]) =>
+      roles.includes("content") ? [{ id: "content-1", email: "content@meska.ai", full_name: "Content Person" }] : [{ id: "admin-1", email: "admin@meska.ai", full_name: "Admin" }],
     trainerRecipient: async (b: { trainers?: { full_name: string } | null }) => ({ id: "", email: "trainer@example.com", full_name: b.trainers?.full_name ?? "" }),
   };
 });
@@ -95,7 +96,11 @@ describe("New deal: happy path", () => {
       expect.stringMatching(/^New training assigned/),
       expect.stringMatching(/^New training assigned/),
       "New booking: Aman Holding HR — trainer emailed",
+      "New content request: Aman Holding — Aman Holding HR",
     ]);
+    // the content team gets the company, program and headcount, never the deal value or proposal
+    expect(h.notified[3].to).toEqual(["content@meska.ai"]);
+    expect(Object.fromEntries(h.notified[3].email!.rows!)).toEqual({ Company: "Aman Holding", Program: "Aman Holding HR", Days: "2", Participants: "2" });
     const trainerRows = h.notified[0].email!.rows!.map(([k]) => k);
     expect(trainerRows).toEqual(["Program", "Date", "Time", "Location", "Industry", "Status"]);
     const teamRows = Object.fromEntries(h.notified[2].email!.rows!);
@@ -111,7 +116,7 @@ describe("New deal: happy path", () => {
     const r = await createRequest(await uploadedRequest({ days: [{ ...validRequest().days[0], trainer_id: undefined }] }));
     expect(r.error).toBeUndefined();
     expect(h.fake.tables.bookings[0]).toMatchObject({ status: "needs_trainer", trainer_id: null, decided_at: null, deal_id: fakeId(1) });
-    expect(h.notified.map((n) => n.title)).toEqual(["Trainer needed: Aman Holding HR"]);
+    expect(h.notified.map((n) => n.title)).toEqual(["Trainer needed: Aman Holding HR", "New content request: Aman Holding — Aman Holding HR"]);
   });
 });
 

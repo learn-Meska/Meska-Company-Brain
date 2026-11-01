@@ -9,6 +9,7 @@ import { trainingIcs } from "@/lib/ics";
 import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, programVisible, slotsFor, todayISO, trainerTitle } from "@/lib/format";
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
+import { checkFile, safeName } from "@/lib/files";
 import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, userWithRole, type BookingRow } from "@/lib/notify";
 import {
   contactError,
@@ -34,14 +35,6 @@ async function loadBookings(ids: string[]) {
 
 const ACTIVE = ["needs_trainer", "pending_approval", "awaiting_trainer", "confirmed"];
 
-// Training materials and briefs: documents, slides, sheets, images, audio/video and archives.
-// Anything that a browser or OS would run (html, svg, exe, scripts…) is refused.
-const FILE_TYPES = /\.(pdf|docx?|pptx?|xlsx?|csv|txt|md|rtf|odt|odp|ods|key|pages|numbers|png|jpe?g|gif|webp|heic|mp4|mov|m4v|webm|mp3|m4a|wav|zip)$/i;
-const safeName = (fileName: string) => String(fileName).replace(/[^\w.\- ]+/g, "_").replace(/^\.+/, "").slice(-120) || "file";
-function checkFile(fileName: string) {
-  if (typeof fileName !== "string" || !FILE_TYPES.test(fileName.trim())) return "That file type isn't allowed. Upload documents, slides, sheets, images, audio/video or a .zip.";
-  return null;
-}
 
 function refresh() {
   for (const p of ["/bookings", "/calendar", "/me", "/me/bookings", "/me/availability"]) revalidatePath(p);
@@ -218,6 +211,23 @@ export async function createRequest(input: NewRequest) {
         ["Proposal", esc(input.proposal.name)],
       ],
       button: open.length ? "Assign a trainer" : "View the training",
+    },
+  });
+  // The content team gets the request too: they read the audience and proposal, then write the content.
+  await notify(await usersWithRoles("content"), {
+    title: `New content request: ${input.company_name.trim()} — ${input.program_name}`,
+    body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the audience and proposal.`,
+    link: `/content/${dealId}`,
+    email: {
+      subject: `Content request: ${input.company_name.trim()} — ${input.program_name}`,
+      intro: `<b>${esc(me.full_name)}</b> sent a new deal. Please read the audience and proposal, prepare the content and upload it, then submit it so the trainer can use it.`,
+      rows: [
+        ["Company", esc(input.company_name.trim())],
+        ["Program", esc(input.program_name)],
+        ["Days", String(rows.length)],
+        ["Participants", String(input.participants.length)],
+      ],
+      button: "Open the request",
     },
   });
   refresh();
@@ -583,9 +593,9 @@ export async function materialLink(id: string) {
 
 /* ---------- Deal proposal ---------- */
 
-// The Meska team only; trainers never see the commercial side of a deal.
+// The Meska team only (the content team reads the proposal to write the content); trainers never see the commercial side of a deal.
 export async function proposalLink(dealId: string) {
-  await requireRole("admin", "approver", "growth");
+  await requireRole("admin", "approver", "growth", "content");
   if (!isUuid(dealId)) return { error: "File not found." };
   const { data } = await db().from("deals").select("proposal_path, proposal_name").eq("id", dealId).maybeSingle();
   const d = data as { proposal_path: string; proposal_name: string } | null;

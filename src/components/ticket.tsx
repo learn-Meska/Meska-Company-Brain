@@ -109,6 +109,25 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
           </ul>
         </div>
       )}
+      {deal?.content && (
+        <div className="rounded-2xl border border-ice2 bg-ice p-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="h2">{trainerView ? "Your guide from the content team" : "Content from the content team"}</h2>
+            <span className="text-xs text-muted">Submitted {fmtDateTime(deal.content.submittedAt)}</span>
+          </div>
+          {deal.content.guide && <p className="whitespace-pre-wrap text-sm leading-relaxed">{deal.content.guide}</p>}
+          {deal.content.files.length > 0 && (
+            <ul className={`space-y-1.5 ${deal.content.guide ? "mt-3" : ""}`}>
+              {deal.content.files.map((f) => (
+                <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2">
+                  <DownloadButton id={f.id} name={f.file_name} kind="content" />
+                  {f.size_bytes ? <span className="text-xs text-muted">{(f.size_bytes / 1048576).toFixed(1)} MB</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {/* New deals don't ask for per-day content; it shows only once the booking team adds some */}
       {b.content && (
         <div className="callout">

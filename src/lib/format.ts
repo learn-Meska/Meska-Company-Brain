@@ -83,6 +83,8 @@ export const AUDIT_LABEL: Record<string, string> = {
   booking_edited: "Booking edited",
   booking_cancelled: "Booking cancelled",
   material_uploaded: "Material uploaded",
+  content_uploaded: "Content file uploaded",
+  content_submitted: "Content submitted",
   trainer_created: "Trainer profile created",
   trainer_invited: "Trainer invited",
   trainer_self_updated: "Trainer updated their own profile",
