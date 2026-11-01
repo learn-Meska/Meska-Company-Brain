@@ -17,7 +17,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Staff who also deliver trainings (e.g. the L&D director) get the trainer pages too.
   if (u.trainer_id && (u.role === u.real_role || u.role === "trainer")) {
     const p = u.role === "trainer" ? "My" : "My trainer";
-    items.push({ href: "/me", label: `${p} profile` }, { href: "/me/calendar", label: "My calendar" }, { href: "/me/availability", label: "My availability" }, { href: "/me/bookings", label: "My trainings" });
+    items.push({ href: "/me", label: `${p} profile` }, { href: "/me/profile", label: "Edit my profile" }, { href: "/me/calendar", label: "My calendar" }, { href: "/me/availability", label: "My availability" }, { href: "/me/bookings", label: "My trainings" });
   }
   const roleLabel = ROLE_LABEL[u.role];
   const canSwitch = u.views.length > 1;
