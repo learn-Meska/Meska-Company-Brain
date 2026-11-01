@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { mainRole, requireRole, requireSettingsEditor, requireTrainerManager } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
@@ -499,6 +500,38 @@ export async function inviteTrainer(fd: FormData) {
   }
   revalidatePath(`/trainers/${id}`);
   return { ok: `Invitation sent to ${t.email}.` };
+}
+
+// Admin only. A trainer with any booking stays (their name is on that history); everyone else can go.
+// Their login is blocked unless it also belongs to a team member.
+export async function deleteTrainer(fd: FormData) {
+  const me = await requireRole("admin");
+  const id = str(fd, "id");
+  if (!isUuid(id)) return { error: "Trainer not found." };
+  const { data } = await db().from("trainers").select("full_name, user_id, photo_path, cv_path").eq("id", id).maybeSingle();
+  const t = data as { full_name: string; user_id: string | null; photo_path: string | null; cv_path: string | null } | null;
+  if (!t) return { error: "Trainer not found." };
+  const { count } = await db().from("bookings").select("id", { count: "exact", head: true }).eq("trainer_id", id);
+  if (count) return { error: `${t.full_name} has ${count} booking${count > 1 ? "s" : ""}, so the profile can't be deleted. Reassign or remove those bookings first.` };
+  for (const table of ["trainer_scores", "trainer_lookups", "availability"]) {
+    const { error } = await db().from(table).delete().eq("trainer_id", id);
+    if (error) return failed(`deleteTrainer ${table}`, error);
+  }
+  const { error } = await db().from("trainers").delete().eq("id", id);
+  if (error) return error.code === "23503" ? { error: `${t.full_name} is still referenced by other records, so the profile can't be deleted.` } : failed("deleteTrainer", error);
+  if (t.photo_path) await db().storage.from("photos").remove([t.photo_path]);
+  if (t.cv_path) await db().storage.from("cvs").remove([t.cv_path]);
+  if (t.user_id) {
+    const { data: u } = await db().from("app_users").select("roles").eq("id", t.user_id).maybeSingle();
+    const staff = ((u as { roles: string[] | null } | null)?.roles ?? []).some((r) => (STAFF_ROLES as readonly string[]).includes(r));
+    if (!staff && t.user_id !== me.id) {
+      const { error: banError } = await db().auth.admin.updateUserById(t.user_id, { ban_duration: "876000h" });
+      if (banError) console.error("[deleteTrainer ban]", banError.message);
+    }
+  }
+  await audit(me.id, "trainer_deleted", null, { id, name: t.full_name });
+  revalidatePath("/trainers");
+  redirect("/trainers");
 }
 
 type TrainerFile = "photo" | "cv";

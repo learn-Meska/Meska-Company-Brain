@@ -8,10 +8,11 @@ import { getTrainerProfiles } from "@/lib/scoring";
 import { fmtDateTime, initials } from "@/lib/format";
 import { CvUploader, PhotoUploader } from "@/components/photo-uploader";
 import { photoUrl } from "@/lib/photos";
-import { inviteTrainer, saveTrainerScores, updateTrainer } from "@/app/(app)/admin/actions";
+import { DeleteTrainer } from "@/components/delete-trainer";
+import { deleteTrainer, inviteTrainer, saveTrainerScores, updateTrainer } from "@/app/(app)/admin/actions";
 
 export default async function EditTrainerPage({ params, searchParams }: PageProps<"/trainers/[id]/edit">) {
-  await requireTrainerManager();
+  const me = await requireTrainerManager();
   const { id } = await params;
   const { created, uploadError } = await searchParams;
   const [t] = await getTrainerProfiles([id]);
@@ -84,6 +85,16 @@ export default async function EditTrainerPage({ params, searchParams }: PageProp
         <h2 className="h2 mb-2">Profile, skills &amp; tags</h2>
         <TrainerForm action={updateTrainer} t={t} />
       </div>
+
+      {me.role === "admin" && (
+        <section className="card flex flex-wrap items-center justify-between gap-3 border-bad/30">
+          <div>
+            <h2 className="h2">Delete profile</h2>
+            <p className="text-sm text-muted">Removes this trainer, their scores, availability and files, and blocks their login. Not possible once they have bookings.</p>
+          </div>
+          <DeleteTrainer action={deleteTrainer} id={t.id} name={t.full_name} />
+        </section>
+      )}
     </div>
   );
 }
