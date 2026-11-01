@@ -84,25 +84,22 @@ export async function findForDays(input: { audienceId: string; industryId: strin
 
 /* ---------- New deal: request a training (trainer optional for the booking team) ---------- */
 
-type Filters = { industry_id: string };
-
-// Trainers free at that day and time who match the industry. A New deal no longer picks an audience level or
-// function (the audience is the uploaded participant list), so those filters are left empty here.
-async function freeTrainers(f: Filters, d: { date: string; start: string; end: string }) {
-  const r = await searchTrainers({ date: d.date, start: d.start, end: d.end, audienceId: "", functionId: "", industryId: f.industry_id, skillIds: [] });
+// Active trainers free at that day and time. For now a New deal matches on availability only: no industry,
+// audience level, function or skill filter (the audience is the uploaded participant list).
+async function freeTrainers(d: { date: string; start: string; end: string }) {
+  const r = await searchTrainers({ date: d.date, start: d.start, end: d.end, audienceId: "", functionId: "", industryId: "", skillIds: [] });
   return r.matches.map((t) => ({ id: t.id, full_name: t.full_name, title: t.title }));
 }
 
 // Request page: the trainers Growth may pick for each day (only names, never the availability calendar).
-export async function requestTrainerOptions(input: Filters & { days: { day_number: number; date: string; start: string; end: string }[] }) {
+export async function requestTrainerOptions(input: { days: { day_number: number; date: string; start: string; end: string }[] }) {
   await requireRole("growth", "admin", "approver");
-  if (!isUuid(String(input?.industry_id ?? ""))) return { error: "Pick the industry first." };
-  if (!Array.isArray(input.days)) return { error: "Add at least one training day." };
+  if (!Array.isArray(input?.days)) return { error: "Add at least one training day." };
   for (const d of input.days) {
     const e = dayError(d);
     if (e) return { error: e };
   }
-  return { days: await Promise.all(input.days.map((d) => freeTrainers({ industry_id: input.industry_id }, d))) };
+  return { days: await Promise.all(input.days.map((d) => freeTrainers(d))) };
 }
 
 // Step 3: a one-time URL to upload the proposal straight to storage, under the uploader's own folder.
@@ -122,7 +119,7 @@ export async function createRequest(input: NewRequest) {
   if (invalid) return { error: invalid };
   // A picked trainer must still be free and matching when the request is sent.
   for (const d of input.days) {
-    if (d.trainer_id && !(await freeTrainers(input, d)).some((t) => t.id === d.trainer_id))
+    if (d.trainer_id && !(await freeTrainers(d)).some((t) => t.id === d.trainer_id))
       return { error: `Day ${d.day_number}: that trainer is no longer available. Pick another or leave it to the booking team.` };
   }
   // The proposal must really be in storage (the browser uploads it before sending the request).

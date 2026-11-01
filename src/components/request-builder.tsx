@@ -54,16 +54,16 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
   const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", trainerId: "" }]);
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
-  // trainers free at each day's time who match the industry
+  // trainers free at each day's time (availability is the only filter for now)
   const [options, setOptions] = useState<{ query: string; days: TrainerOpt[][] | null; error: string }>({ query: "", days: null, error: "" });
   const patch = (key: number, p: Partial<Day>) => setDays((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d)));
 
-  const ready = !!f.industry_id && days.every((d) => d.date && d.start && d.end);
-  const query = ready ? JSON.stringify([f.industry_id, days.map((d) => [d.date, d.start, d.end])]) : "";
+  const ready = days.every((d) => d.date && d.start && d.end);
+  const query = ready ? JSON.stringify([days.map((d) => [d.date, d.start, d.end])]) : "";
   useEffect(() => {
     if (!query) return;
     const t = setTimeout(async () => {
-      const r = await requestTrainerOptions({ industry_id: f.industry_id, days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end })) });
+      const r = await requestTrainerOptions({ days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end })) });
       setOptions({ query, days: "days" in r && r.days ? r.days : null, error: r.error ?? "" });
       // drop a pick that no longer fits
       if ("days" in r && r.days) setDays((ds) => ds.map((d, i) => (d.trainerId && !r.days![i]?.some((x) => x.id === d.trainerId) ? { ...d, trainerId: "" } : d)));
@@ -297,7 +297,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
               <div>
                 <label className="label" htmlFor={`t${d.key}`}>Trainer{trainerRequired ? " *" : ""}</label>
                 {!ready ? (
-                  <p className="text-xs text-muted">Pick the industry (step 1) and the date to see the available trainers.</p>
+                  <p className="text-xs text-muted">Fill in the date and time to see the available trainers.</p>
                 ) : !opts ? (
                   <p className="text-xs text-muted">{options.query === query && options.error ? options.error : "Finding available trainers…"}</p>
                 ) : opts[i].length === 0 ? (

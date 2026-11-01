@@ -161,9 +161,9 @@ describe("New deal: refusals leave nothing behind", () => {
 });
 
 describe("New deal: helpers around the form", () => {
-  it("trainer options only need the industry now", async () => {
-    expect(await requestTrainerOptions({ industry_id: "", days: [] })).toEqual({ error: "Pick the industry first." });
-    expect(await requestTrainerOptions({ industry_id: INDUSTRY, days: [{ day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00" }] })).toEqual({
+  it("trainer options only need the day and time (availability is the only filter)", async () => {
+    expect(await requestTrainerOptions({ days: [] })).toEqual({ days: [] });
+    expect(await requestTrainerOptions({ days: [{ day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00" }] })).toEqual({
       days: [[{ id: TRAINER, full_name: "Trainer One", title: "AI coach" }]],
     });
   });
