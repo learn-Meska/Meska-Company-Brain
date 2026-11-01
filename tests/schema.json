@@ -48,14 +48,16 @@
     "proposal_path",
     "proposal_name",
     "proposal_size",
-    "participant_count",
-    "all_departments",
     "created_by",
     "created_at"
   ],
-  "deal_audience": [
+  "deal_participants": [
+    "id",
     "deal_id",
-    "lookup_id"
+    "position",
+    "name",
+    "title",
+    "department"
   ],
   "buckets": [
     "proposals"

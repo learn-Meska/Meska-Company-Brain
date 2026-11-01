@@ -7,16 +7,14 @@ import { fmtNps } from "@/lib/survey";
 import { googleCalendarUrl } from "@/lib/ics";
 import { siteUrl } from "@/lib/email";
 import type { BookingRow } from "@/lib/notify";
-import { audienceSummary, getDealAudience } from "@/lib/deal-audience";
 
 type Material = { id: string; file_name: string; size_bytes: number | null; created_at: string; kind: string };
 
 // trainerView: the assigned trainer is looking — hide the program until 2 days before, and let them write the brief.
 export async function Ticket({ b, canUpload, trainerView = false }: { b: BookingRow; canUpload: boolean; trainerView?: boolean }) {
-  const [{ data: mats }, { data: skills }, audience] = await Promise.all([
+  const [{ data: mats }, { data: skills }] = await Promise.all([
     db().from("booking_materials").select("*").eq("booking_id", b.id).order("created_at"),
     b.skill_ids.length ? db().from("skills").select("name").in("id", b.skill_ids) : Promise.resolve({ data: [] }),
-    getDealAudience(b.deal_id),
   ]);
   const all = (mats ?? []) as Material[];
   const materials = all.filter((m) => m.kind !== "brief");
@@ -42,13 +40,11 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
         "To be confirmed"
       ),
     ],
-    // requests made before New deals had one audience level, a function and skills on the booking itself
+    // requests made before New deals had an audience level, function and skills; new deals only have the industry
     ...(b.audience ? [["Audience", b.audience.name] as [string, React.ReactNode]] : []),
     ...(b.func ? [["Function", b.func.name] as [string, React.ReactNode]] : []),
     ["Industry", b.industry?.name],
     ...(b.skill_ids.length ? [["Skills", ((skills ?? []) as { name: string }[]).map((s) => s.name).join(", ") || "—"] as [string, React.ReactNode]] : []),
-    // New deals: the audience Growth picked (seniority, departments, headcount); trainers see it too
-    ...(audience ? audienceSummary(audience) : []),
   ];
   // the client contact is for the Meska team only
   if (!trainerView && b.contact_name) {

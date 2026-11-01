@@ -20,8 +20,6 @@ export const contactFields = (c: ClientContact) => ({ contact_name: c.name.trim(
 
 /* ---------- Training days ---------- */
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export const TIME = /^\d{2}:\d{2}$/;
 export const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -34,60 +32,106 @@ export const dayError = (d: { day_number: number; date: string; start: string; e
         ? `Day ${d.day_number}: the time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM).`
         : null;
 
-/* ---------- Audience: seniority levels, departments and headcount ---------- */
+/* ---------- Participants (the audience, uploaded as a CSV) ---------- */
 
-// Picked from the lists admins keep in Scoring & lists: lookups of kind "audience" (seniority) and "function" (departments).
-export type Audience = { level_ids: string[]; department_ids: string[]; all_departments: boolean; participant_count: number };
+export type Participant = { name: string; title: string; department: string };
 
-export const MAX_PARTICIPANTS = 10_000;
-// One-tap chips above the department search; names that aren't in the list are simply not shown.
-export const COMMON_DEPARTMENTS = ["HR", "Sales", "Finance", "Marketing", "Operations", "IT", "Executive Office", "Customer Service"];
+export const PARTICIPANT_COLUMNS = ["name", "title", "department"] as const;
+export const MAX_PARTICIPANTS = 500;
+const MAX_FIELD = 200;
 
-const isIdList = (v: unknown, max: number): v is string[] => Array.isArray(v) && v.length <= max && v.every((x) => typeof x === "string" && UUID.test(x)) && new Set(v).size === v.length;
+// The file Growth downloads and fills in. The BOM makes Excel open it as UTF-8 (Arabic names stay intact).
+export const PARTICIPANTS_TEMPLATE_CSV = "﻿" + PARTICIPANT_COLUMNS.join(",") + "\r\n";
+export const PARTICIPANTS_TEMPLATE_NAME = "participants-template.csv";
 
-export function audienceError(a: Partial<Audience> | undefined): string | null {
-  if (!a || typeof a !== "object") return "Pick the audience.";
-  if (!isIdList(a.level_ids, 20) || !a.level_ids.length) return "Pick at least one seniority level.";
-  if (typeof a.all_departments !== "boolean" || !isIdList(a.department_ids, 100)) return "Pick the departments again.";
-  if (!a.all_departments && !a.department_ids.length) return "Pick at least one department, or “Mixed / all departments”.";
-  if (a.all_departments && a.department_ids.length) return "Pick departments or “Mixed / all departments”, not both.";
-  const n = Number(a.participant_count);
-  if (!Number.isInteger(n) || n < 1 || n > MAX_PARTICIPANTS) return `Enter the number of participants (1 to ${MAX_PARTICIPANTS.toLocaleString("en-US")}).`;
+// RFC 4180: quoted fields, "" inside quotes, commas and line breaks inside quotes, CRLF or LF.
+// Excel in some regions saves with semicolons, so the header line decides the delimiter.
+export function parseCsv(text: string): string[][] {
+  const src = text.replace(/^﻿/, "");
+  const firstLine = src.split(/\r?\n/, 1)[0] ?? "";
+  const delim = !firstLine.includes(",") && firstLine.includes(";") ? ";" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else quoted = false;
+      } else field += ch;
+    } else if (ch === '"' && field === "") quoted = true;
+    else if (ch === delim) {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && src[i + 1] === "\n") i++;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else field += ch;
+  }
+  if (field !== "" || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+const clean = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
+
+// Reads the filled-in template. Every row needs a name; title and department may be blank.
+export function parseParticipants(text: string): { participants: Participant[]; error: string | null } {
+  const rows = parseCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
+  if (!rows.length) return { participants: [], error: "The file is empty. Download the template and add one participant per row." };
+  const header = rows[0].map((h) => clean(h).toLowerCase());
+  const at = PARTICIPANT_COLUMNS.map((c) => header.indexOf(c));
+  const missing = PARTICIPANT_COLUMNS.filter((_, i) => at[i] < 0);
+  if (missing.length) return { participants: [], error: `The file must use the template's columns: name, title, department (missing: ${missing.join(", ")}).` };
+  const body = rows.slice(1);
+  if (!body.length) return { participants: [], error: "The file has no participants. Add one participant per row under the header." };
+  if (body.length > MAX_PARTICIPANTS) return { participants: [], error: `A deal can list at most ${MAX_PARTICIPANTS} participants (the file has ${body.length}).` };
+  const participants: Participant[] = [];
+  for (const [i, r] of body.entries()) {
+    const [name, title, department] = at.map((j) => clean(r[j]));
+    if (!name) return { participants: [], error: `Row ${i + 2}: the name is missing.` };
+    if ([name, title, department].some((v) => v.length > MAX_FIELD)) return { participants: [], error: `Row ${i + 2}: a value is longer than ${MAX_FIELD} characters.` };
+    participants.push({ name, title, department });
+  }
+  return { participants, error: null };
+}
+
+// The server re-checks the list the browser parsed (it can be called with anything).
+export function participantsError(list: unknown): string | null {
+  if (!Array.isArray(list) || !list.length) return "Upload the participants file (name, title, department).";
+  if (list.length > MAX_PARTICIPANTS) return `A deal can list at most ${MAX_PARTICIPANTS} participants.`;
+  for (const [i, p] of list.entries()) {
+    if (!p || typeof p !== "object") return `Participant ${i + 1} is not valid.`;
+    const { name, title, department } = p as Record<string, unknown>;
+    if (![name, title, department].every((v) => v == null || typeof v === "string")) return `Participant ${i + 1} is not valid.`;
+    if (!clean(name)) return `Participant ${i + 1}: the name is missing.`;
+    if ([name, title, department].some((v) => clean(v).length > MAX_FIELD)) return `Participant ${i + 1}: a value is longer than ${MAX_FIELD} characters.`;
+  }
   return null;
 }
 
-// The rows saved in deal_audience: one per picked level and department.
-export const audienceRows = (dealId: string, a: Audience) => [...a.level_ids, ...a.department_ids].map((lookup_id) => ({ deal_id: dealId, lookup_id }));
-
-// "Junior Level (Entry-Level / Associates)" → { main: "Junior Level", sub: "Entry-Level / Associates" }, for compact chips.
-export function splitLabel(name: string) {
-  const m = name.match(/^(.*?)\s*\((.*)\)\s*$/);
-  return m ? { main: m[1], sub: m[2] } : { main: name, sub: "" };
+// Quotes a value for CSV and defuses spreadsheet formulas (=, +, -, @) so opening the file never runs anything.
+function csvCell(v: string) {
+  const s = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/* ---------- Matching trainers to the audience ---------- */
-
-type Matchable = { lookups: { id: string }[]; tier: { audience_ids: string[] } | null };
-
-// Seniority filters: the trainer must be tagged with every picked level, and their tier (if it has audience rules) must allow each.
-export function fitsLevels(t: Matchable, levelIds: string[]) {
-  const tags = new Set(t.lookups.map((l) => l.id));
-  return levelIds.every((id) => tags.has(id) && (!t.tier || !t.tier.audience_ids.length || t.tier.audience_ids.includes(id)));
+// The participant list in the template's own format, so it can be edited and uploaded again.
+export function participantsCsv(list: { name: string; title: string | null; department: string | null }[]) {
+  return "﻿" + [PARTICIPANT_COLUMNS.join(","), ...list.map((p) => [p.name, p.title ?? "", p.department ?? ""].map(csvCell).join(","))].join("\r\n") + "\r\n";
 }
 
-// Departments rank instead of filter: how many of the picked departments the trainer covers.
-export function departmentMatches(t: Pick<Matchable, "lookups">, departmentIds: string[]) {
-  const tags = new Set(t.lookups.map((l) => l.id));
-  return departmentIds.filter((id) => tags.has(id)).length;
-}
-
-// More departments covered first; the existing score order (total) breaks ties.
-export function rankByDepartments<T extends Pick<Matchable, "lookups"> & { total: number }>(list: T[], departmentIds: string[]) {
-  return list
-    .map((t) => ({ t, n: departmentMatches(t, departmentIds) }))
-    .sort((a, b) => b.n - a.n || b.t.total - a.t.total)
-    .map(({ t, n }) => ({ ...t, departments: n }));
-}
+export const participantRows =(dealId: string, list: Participant[]) =>
+  list.map((p, i) => ({ deal_id: dealId, position: i + 1, name: clean(p.name), title: clean(p.title) || null, department: clean(p.department) || null }));
 
 /* ---------- Proposal and value ---------- */
 
@@ -135,7 +179,7 @@ export type NewRequest = {
   program_name: string;
   industry_id: string;
   contact: ClientContact;
-  audience: Audience;
+  participants: Participant[];
   proposal: ProposalFile;
   value_per_day: number;
   deal_days: number;
@@ -143,6 +187,7 @@ export type NewRequest = {
   days: NewRequestDay[];
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const PAST_DATE = "Trainings can't be scheduled on a date that has already passed.";
 
 // Proposals are uploaded under the uploader's own folder, so nobody can attach someone else's file.
@@ -163,9 +208,9 @@ export function requestError(input: NewRequest, who: { role: string; userId: str
   if (typeof input.industry_id !== "string" || !UUID.test(input.industry_id)) return "Pick the industry.";
   const ce = contactError(input.contact);
   if (ce) return ce;
-  // Step 2: audience
-  const ae = audienceError(input.audience);
-  if (ae) return ae;
+  // Step 2: participants
+  const pe = participantsError(input.participants);
+  if (pe) return pe;
   // Step 3: proposal and value
   const fe = proposalPathError(input.proposal, who.userId);
   if (fe) return fe;

@@ -2,7 +2,6 @@ import "server-only";
 import { db } from "./supabase";
 import { slotsFor } from "./format";
 import { getTrainerProfiles, type TrainerProfile } from "./scoring";
-import { fitsLevels } from "./deal";
 
 export type SearchInput = {
   date: string;
@@ -13,8 +12,6 @@ export type SearchInput = {
   industryId: string;
   skillIds: string[];
   excludeBookingId?: string;
-  // New deals: several seniority levels, and the trainer must fit every one (tag + tier rule)
-  audienceIds?: string[];
 };
 
 export type SearchResult = { matches: TrainerProfile[]; slots: string[]; unavailableCount: number };
@@ -52,7 +49,6 @@ function filterProfiles(profiles: TrainerProfile[], q: SearchInput) {
     for (const id of [q.audienceId, q.functionId, q.industryId]) if (id && !tags.has(id)) return false;
     // A tier with no audience rules may train anyone.
     if (q.audienceId && t.tier && t.tier.audience_ids.length && !t.tier.audience_ids.includes(q.audienceId)) return false;
-    if (q.audienceIds?.length && !fitsLevels(t, q.audienceIds)) return false;
     return true;
   });
   return matches.sort((a, b) => b.total - a.total);

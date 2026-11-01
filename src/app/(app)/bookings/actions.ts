@@ -18,14 +18,12 @@ import {
   dealTotal,
   fmtAmount,
   PAST_DATE,
-  audienceRows,
+  participantRows,
   proposalFileError,
-  rankByDepartments,
   requestError,
   TIME,
   type NewRequest,
 } from "@/lib/deal";
-import { audienceLookupsError, audienceSummary, getDealAudience, type DealAudience } from "@/lib/deal-audience";
 
 async function loadBookings(ids: string[]) {
   const valid = ids.filter(isUuid);
@@ -86,32 +84,25 @@ export async function findForDays(input: { audienceId: string; industryId: strin
 
 /* ---------- New deal: request a training (trainer optional for the booking team) ---------- */
 
-type Filters = { industry_id: string; level_ids: string[]; department_ids: string[] };
+type Filters = { industry_id: string };
 
-// Trainers free at that day and time who match the industry and fit every picked seniority level,
-// ranked so those covering more of the picked departments come first.
+// Trainers free at that day and time who match the industry. A New deal no longer picks an audience level or
+// function (the audience is the uploaded participant list), so those filters are left empty here.
 async function freeTrainers(f: Filters, d: { date: string; start: string; end: string }) {
-  const r = await searchTrainers({ date: d.date, start: d.start, end: d.end, audienceId: "", audienceIds: f.level_ids, functionId: "", industryId: f.industry_id, skillIds: [] });
-  return rankByDepartments(r.matches, f.department_ids).map((t) => ({ id: t.id, full_name: t.full_name, title: t.title, departments: t.departments }));
+  const r = await searchTrainers({ date: d.date, start: d.start, end: d.end, audienceId: "", functionId: "", industryId: f.industry_id, skillIds: [] });
+  return r.matches.map((t) => ({ id: t.id, full_name: t.full_name, title: t.title }));
 }
-
-const idList = (v: unknown) => (Array.isArray(v) && v.length <= 100 && v.every((x) => typeof x === "string" && isUuid(x)) ? (v as string[]) : null);
 
 // Request page: the trainers Growth may pick for each day (only names, never the availability calendar).
 export async function requestTrainerOptions(input: Filters & { days: { day_number: number; date: string; start: string; end: string }[] }) {
   await requireRole("growth", "admin", "approver");
   if (!isUuid(String(input?.industry_id ?? ""))) return { error: "Pick the industry first." };
-  const levels = idList(input.level_ids);
-  const departments = idList(input.department_ids);
-  if (!levels?.length) return { error: "Pick at least one seniority level first." };
-  if (!departments) return { error: "Pick the departments again." };
   if (!Array.isArray(input.days)) return { error: "Add at least one training day." };
   for (const d of input.days) {
     const e = dayError(d);
     if (e) return { error: e };
   }
-  const f = { industry_id: input.industry_id, level_ids: levels, department_ids: departments };
-  return { days: await Promise.all(input.days.map((d) => freeTrainers(f, d))) };
+  return { days: await Promise.all(input.days.map((d) => freeTrainers({ industry_id: input.industry_id }, d))) };
 }
 
 // Step 3: a one-time URL to upload the proposal straight to storage, under the uploader's own folder.
@@ -127,13 +118,11 @@ export async function createProposalUpload(fileName: string, size: number) {
 
 export async function createRequest(input: NewRequest) {
   const me = await requireRole("growth", "admin", "approver");
-  const invalid = requestError(input, { role: me.role, userId: me.id, today: todayISO() }) ?? (await audienceLookupsError(input.audience));
+  const invalid = requestError(input, { role: me.role, userId: me.id, today: todayISO() });
   if (invalid) return { error: invalid };
-  const a = input.audience;
-  const filters = { industry_id: input.industry_id, level_ids: a.level_ids, department_ids: a.department_ids };
   // A picked trainer must still be free and matching when the request is sent.
   for (const d of input.days) {
-    if (d.trainer_id && !(await freeTrainers(filters, d)).some((t) => t.id === d.trainer_id))
+    if (d.trainer_id && !(await freeTrainers(input, d)).some((t) => t.id === d.trainer_id))
       return { error: `Day ${d.day_number}: that trainer is no longer available. Pick another or leave it to the booking team.` };
   }
   // The proposal must really be in storage (the browser uploads it before sending the request).
@@ -152,20 +141,18 @@ export async function createRequest(input: NewRequest) {
       proposal_path: input.proposal.path,
       proposal_name: String(input.proposal.name).slice(0, 200),
       proposal_size: Number.isFinite(Number(input.proposal.size)) ? Number(input.proposal.size) : null,
-      participant_count: Number(a.participant_count),
-      all_departments: a.all_departments,
       created_by: me.id,
     })
     .select("id")
     .single();
   if (dealErr || !deal) return { error: friendlyError(dealErr?.message ?? "Could not save the deal.") };
   const dealId = (deal as { id: string }).id;
-  // Anything that fails after this point removes the deal again (its audience rows go with it).
+  // Anything that fails after this point removes the deal again (its participants go with it).
   const undo = () => db().from("deals").delete().eq("id", dealId);
-  const { error: audErr } = await db().from("deal_audience").insert(audienceRows(dealId, a));
-  if (audErr) {
+  const { error: partErr } = await db().from("deal_participants").insert(participantRows(dealId, input.participants));
+  if (partErr) {
     await undo();
-    return { error: friendlyError(audErr.message) };
+    return { error: friendlyError(partErr.message) };
   }
 
   const batch = input.days.length > 1 ? randomUUID() : null;
@@ -208,10 +195,9 @@ export async function createRequest(input: NewRequest) {
     return { ok: "Request sent. It's on the calendar.", ids };
   }
   const total = dealTotal(valuePerDay, dealDays);
-  const audience = await getDealAudience(dealId);
   for (const b of rows) {
-    await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null, deal: dealId, value_per_day: valuePerDay, days: dealDays, participants: a.participant_count });
-    if (b.trainer_id) await emailAssignment(b, audience);
+    await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null, deal: dealId, value_per_day: valuePerDay, days: dealDays, participants: input.participants.length });
+    if (b.trainer_id) await emailAssignment(b);
   }
   const open = rows.filter((b) => !b.trainer_id);
   const sameNote = input.same_trainer && open.length > 1;
@@ -230,7 +216,7 @@ export async function createRequest(input: NewRequest) {
         ["Client contact", `${esc(input.contact.name)} · ${esc(input.contact.email)} · ${esc(input.contact.mobile)}`],
         ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${b.trainers ? esc(b.trainers.full_name) : "<i>needs a trainer</i>"}`] as [string, string]),
         ["Industry", esc(rows[0].industry?.name ?? "")],
-        ...(audience ? audienceSummary(audience).map(([k, v]) => [k, esc(v)] as [string, string]) : []),
+        ["Participants", String(input.participants.length)],
         ["Deal value", `${fmtAmount(valuePerDay)} per day × ${dealDays} ${dealDays === 1 ? "day" : "days"} = <b>${fmtAmount(total)}</b>`],
         ["Proposal", esc(input.proposal.name)],
       ],
@@ -249,25 +235,18 @@ export async function requestCandidates(bookingId: string) {
   const [b] = await loadBookings([bookingId]);
   if (!b) return { error: "Request not found." };
   const days = b.batch_id ? (await loadBatch(b.batch_id)).filter((d) => d.status === "needs_trainer") : [b];
-  // New deals match on their seniority levels (filter) and departments (rank), like the request form does.
-  const deal = await getDealAudience(b.deal_id);
-  const levelIds = deal?.levels.map((l) => l.id) ?? [];
-  const departmentIds = deal?.departments.map((d) => d.id) ?? [];
   const lists = await Promise.all(
-    days.map((d) =>
-      searchTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5), audienceId: d.audience_id ?? "", audienceIds: levelIds, functionId: d.function_id ?? "", industryId: d.industry_id ?? "", skillIds: d.skill_ids }),
-    ),
+    days.map((d) => searchTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5), audienceId: d.audience_id ?? "", functionId: d.function_id ?? "", industryId: d.industry_id ?? "", skillIds: d.skill_ids })),
   );
-  const slim = (t: Awaited<ReturnType<typeof searchTrainers>>["matches"][number] & { departments: number }) => ({
+  const slim = (t: Awaited<ReturnType<typeof searchTrainers>>["matches"][number]) => ({
     id: t.id,
     full_name: t.full_name,
     total: t.total,
     tier: t.tier ? { name: t.tier.name, color: t.tier.color } : null,
     feedback: t.feedback.average,
     delivered: t.delivered,
-    departments: departmentIds.length ? { matched: t.departments, of: departmentIds.length } : null,
   });
-  const perDay = lists.map((l) => rankByDepartments(l.matches, departmentIds).map(slim));
+  const perDay = lists.map((l) => l.matches.map(slim));
   const common = perDay.length > 1 ? perDay[0].filter((t) => perDay.every((list) => list.some((x) => x.id === t.id))) : [];
   return { days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, start: d.start_time, end: d.end_time, matches: perDay[i] })), common };
 }
@@ -316,10 +295,8 @@ export async function assignTrainer(assignments: { bookingId: string; trainerId:
 
 /* ---------- Assignment email to the trainer ---------- */
 
-// audience: the New deal's seniority/departments/headcount (looked up when not passed in).
-async function emailAssignment(b: BookingRow, audience?: DealAudience | null) {
+async function emailAssignment(b: BookingRow) {
   const hours = (await getSetting("trainer_response", { hours: 48 })).hours;
-  const a = audience === undefined ? await getDealAudience(b.deal_id) : audience;
   await notify([await trainerRecipient(b)], {
     title: `New training assigned: ${trainerTitle(b)}`,
     body: `${when(b)} · ${b.industry?.name ?? ""}. Please confirm.`,
@@ -327,7 +304,7 @@ async function emailAssignment(b: BookingRow, audience?: DealAudience | null) {
     email: {
       subject: `Training assignment — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
       intro: `You have been booked to deliver a training for a client in the <b>${esc(b.industry?.name ?? "")}</b> industry on <b>${esc(fmtDate(b.date))}</b>, ${fmtTime(b.start_time)} – ${fmtTime(b.end_time)}. Please review the details below and <b>confirm that you received this assignment</b> within ${hours} hours.`,
-      rows: [...bookingRows(b, true), ...(a ? audienceSummary(a).map(([k, v]) => [k, esc(v)] as [string, string]) : [])],
+      rows: bookingRows(b, true),
       content: b.content || undefined,
       button: "Confirm the assignment",
       extra: `<p style="margin:0 0 16px;font-size:13px;color:#33415C">The calendar invite is attached. Open it to add this training to your calendar.</p>`,

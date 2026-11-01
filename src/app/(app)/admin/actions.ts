@@ -72,9 +72,6 @@ export async function deleteLookup(fd: FormData) {
   if (!isUuid(id)) return { error: "Not found." };
   const { count } = await db().from("bookings").select("id", { count: "exact", head: true }).or(`audience_id.eq.${id},function_id.eq.${id},industry_id.eq.${id}`);
   if (count) return { error: `It's used by ${count} booking${count > 1 ? "s" : ""}, so it can't be removed.` };
-  // New deals pick seniority levels and departments from these lists too.
-  const { count: deals } = await db().from("deal_audience").select("deal_id", { count: "exact", head: true }).eq("lookup_id", id);
-  if (deals) return { error: `It's used by ${deals} deal${deals > 1 ? "s" : ""}, so it can't be removed.` };
   // Trainer tags and tier audiences that point at it go with it.
   await db().from("trainer_lookups").delete().eq("lookup_id", id);
   await db().from("tier_audience").delete().eq("lookup_id", id);
