@@ -1,13 +1,13 @@
-// Compensation is entered by hand: these only check what's typed is usable and that the cards add up.
+// Compensation is entered by hand: these only check what's chosen and typed is usable and that the cards add up.
 
 import { describe, expect, it } from "vitest";
-import { egp, parseCompensation, summarizeCompensation } from "@/lib/compensation";
+import { egp, isAssignedTo, parseCompensation, summarizeCompensation, trainingLabel } from "@/lib/compensation";
 
 const TRAINER = "11111111-1111-4111-8111-111111111111";
+const BOOKING = "22222222-2222-4222-8222-222222222222";
 const input = (over: Partial<Parameters<typeof parseCompensation>[0]> = {}) => ({
   trainer_id: TRAINER,
-  training_date: "2026-11-11",
-  training: "  Cairo Logistics Co., AI Strategy Workshop ",
+  booking_id: BOOKING,
   hours: "4",
   rate: "700",
   amount: "2,800",
@@ -17,10 +17,10 @@ const input = (over: Partial<Parameters<typeof parseCompensation>[0]> = {}) => (
 });
 
 describe("parseCompensation", () => {
-  it("keeps only the known fields, trimmed and as numbers", () => {
-    const extra = { ...input(), created_by: "someone", id: "x" };
+  it("keeps only the known fields, as numbers", () => {
+    const extra = { ...input(), created_by: "someone", id: "x", training: "typed in the browser", training_date: "2020-01-01" };
     expect(parseCompensation(extra)).toEqual({
-      row: { trainer_id: TRAINER, training_date: "2026-11-11", training: "Cairo Logistics Co., AI Strategy Workshop", hours: 4, rate: 700, amount: 2800, status: "approved", payment_date: "2026-11-30" },
+      row: { trainer_id: TRAINER, booking_id: BOOKING, hours: 4, rate: 700, amount: 2800, status: "approved", payment_date: "2026-11-30" },
     });
   });
 
@@ -36,17 +36,44 @@ describe("parseCompensation", () => {
 
   it.each([
     [{ trainer_id: "nope" }, "Choose a trainer."],
-    [{ training_date: "2026-02-31" }, "Enter the training date."],
-    [{ training: "   " }, "Enter the training."],
-    [{ training: "x".repeat(201) }, "Keep the training name under 200 characters."],
+    [{ booking_id: "" }, "Choose a training."],
+    [{ booking_id: "free text" }, "Choose a training."],
     [{ hours: "six" }, "Enter the hours as a number."],
     [{ rate: "-1" }, "Enter the rate as a number."],
     [{ amount: "" }, "Enter the amount as a number."],
     [{ amount: "Infinity" }, "Enter the amount as a number."],
     [{ status: "held" }, "Choose a status."],
-    [{ payment_date: "soon" }, "Enter a valid payment date."],
+    [{ payment_date: "2026-02-31" }, "Enter a valid payment date."],
   ])("rejects %j", (over, error) => {
     expect(parseCompensation(input(over))).toEqual({ error });
+  });
+});
+
+describe("isAssignedTo", () => {
+  it.each(["awaiting_trainer", "confirmed"])("accepts the trainer's %s training", (status) => {
+    expect(isAssignedTo({ trainer_id: TRAINER, status }, TRAINER)).toBe(true);
+  });
+
+  it.each(["needs_trainer", "cancelled", "declined", "rejected", "pending_approval"])("rejects a %s training", (status) => {
+    expect(isAssignedTo({ trainer_id: TRAINER, status }, TRAINER)).toBe(false);
+  });
+
+  it("rejects another trainer's training and an unassigned one", () => {
+    expect(isAssignedTo({ trainer_id: BOOKING, status: "confirmed" }, TRAINER)).toBe(false);
+    expect(isAssignedTo({ trainer_id: null, status: "confirmed" }, TRAINER)).toBe(false);
+  });
+});
+
+describe("trainingLabel", () => {
+  it("shows the day only for multi-day trainings", () => {
+    const deals = { company_name: "Cairo Logistics Co." };
+    expect(trainingLabel({ program_name: "AI Strategy Workshop", day_number: 1, batch_id: null, deals })).toBe("Cairo Logistics Co., AI Strategy Workshop");
+    expect(trainingLabel({ program_name: "AI Copilot", day_number: 2, batch_id: "b1", deals })).toBe("Cairo Logistics Co., AI Copilot, Day 2");
+  });
+
+  it("works without a company", () => {
+    expect(trainingLabel({ program_name: "AI Copilot", day_number: 1, batch_id: null, deals: null })).toBe("AI Copilot");
+    expect(trainingLabel({ program_name: "AI Copilot", day_number: 1, batch_id: null, deals: { company_name: " " } })).toBe("AI Copilot");
   });
 });
 

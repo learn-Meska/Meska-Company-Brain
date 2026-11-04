@@ -9,6 +9,7 @@ export const COMPENSATION_STATUS_LABEL: Record<CompensationStatus, string> = { p
 export type CompensationLine = {
   id: string;
   trainer_id: string;
+  booking_id: string | null;
   training_date: string;
   training: string;
   hours: number;
@@ -17,9 +18,19 @@ export type CompensationLine = {
   status: CompensationStatus;
   payment_date: string | null;
 };
-export type CompensationRow = Omit<CompensationLine, "id">;
+// What Training Excellence chooses and types. The training's name and date come from the chosen booking.
+export type CompensationInput = Omit<CompensationLine, "id" | "training" | "training_date"> & { booking_id: string };
 
-export const COMPENSATION_COLUMNS = "id, trainer_id, training_date, training, hours, rate, amount, status, payment_date";
+export const COMPENSATION_COLUMNS = "id, trainer_id, booking_id, training_date, training, hours, rate, amount, status, payment_date";
+
+// A training can be chosen while it is assigned to the trainer: waiting for their answer, or confirmed.
+export const ASSIGNED_STATUSES = ["awaiting_trainer", "confirmed"];
+export const isAssignedTo = (b: { trainer_id: string | null; status: string }, trainerId: string) => b.trainer_id === trainerId && ASSIGNED_STATUSES.includes(b.status);
+
+// "Cairo Logistics Co., AI Strategy Workshop, Day 1". Only multi-day trainings have a batch, so only they show the day.
+export function trainingLabel(b: { program_name: string; day_number: number; batch_id: string | null; deals?: { company_name: string | null } | null }) {
+  return [b.deals?.company_name?.trim(), b.program_name, b.batch_id ? `Day ${b.day_number}` : null].filter(Boolean).join(", ");
+}
 
 const MAX_NUMBER = 1_000_000_000;
 
@@ -36,12 +47,9 @@ function toNumber(s: string) {
   return Number.isFinite(n) && n >= 0 && n <= MAX_NUMBER ? n : null;
 }
 
-export function parseCompensation(input: Record<keyof CompensationRow, string>): { error: string } | { row: CompensationRow } {
+export function parseCompensation(input: Record<keyof CompensationInput, string>): { error: string } | { row: CompensationInput } {
   if (!isUuid(input.trainer_id)) return { error: "Choose a trainer." };
-  if (!isDate(input.training_date)) return { error: "Enter the training date." };
-  const training = input.training.trim();
-  if (!training) return { error: "Enter the training." };
-  if (training.length > 200) return { error: "Keep the training name under 200 characters." };
+  if (!isUuid(input.booking_id)) return { error: "Choose a training." };
   const hours = toNumber(input.hours);
   if (hours === null) return { error: "Enter the hours as a number." };
   const rate = toNumber(input.rate);
@@ -54,8 +62,7 @@ export function parseCompensation(input: Record<keyof CompensationRow, string>):
   return {
     row: {
       trainer_id: input.trainer_id,
-      training_date: input.training_date,
-      training,
+      booking_id: input.booking_id,
       hours,
       rate,
       amount,

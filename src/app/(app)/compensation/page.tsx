@@ -3,70 +3,31 @@ import { CompensationCards, CompensationTable } from "@/components/compensation"
 import { Form, Submit } from "@/components/form";
 import { PageHeader } from "@/components/page-header";
 import { requireRole } from "@/lib/auth";
-import { COMPENSATION_COLUMNS, COMPENSATION_STATUSES, COMPENSATION_STATUS_LABEL, type CompensationLine } from "@/lib/compensation";
-import { isUuid, todayISO } from "@/lib/format";
+import { CompensationFields, type TrainerOption, type TrainingOption } from "@/components/compensation-fields";
+import { ASSIGNED_STATUSES, COMPENSATION_COLUMNS, trainingLabel, type CompensationLine } from "@/lib/compensation";
+import { fmtDate, isUuid } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
 import { addCompensation, deleteCompensation, updateCompensation } from "./actions";
 
-type TrainerOption = { id: string; full_name: string };
+type AssignedDay = { id: string; trainer_id: string; date: string; status: string } & Parameters<typeof trainingLabel>[0];
 
-function Fields({ trainers, line, trainerId }: { trainers: TrainerOption[]; line?: CompensationLine; trainerId: string }) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="sm:col-span-2">
-        <label className="label" htmlFor="trainer_id">Trainer</label>
-        <select id="trainer_id" name="trainer_id" required defaultValue={line?.trainer_id ?? trainerId} className="input">
-          <option value="">Choose a trainer…</option>
-          {trainers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
-        </select>
-      </div>
-      <div className="sm:col-span-2">
-        <label className="label" htmlFor="training">Training</label>
-        <input id="training" name="training" required maxLength={200} defaultValue={line?.training} placeholder="e.g. Cairo Logistics Co., AI Strategy Workshop" className="input" />
-      </div>
-      <div>
-        <label className="label" htmlFor="training_date">Date</label>
-        <input id="training_date" name="training_date" type="date" required defaultValue={line?.training_date ?? todayISO()} className="input" />
-      </div>
-      <div>
-        <label className="label" htmlFor="hours">Hours</label>
-        <input id="hours" name="hours" inputMode="decimal" required defaultValue={line?.hours} className="input" />
-      </div>
-      <div>
-        <label className="label" htmlFor="rate">Rate (EGP per hour)</label>
-        <input id="rate" name="rate" inputMode="decimal" required defaultValue={line?.rate} className="input" />
-      </div>
-      <div>
-        <label className="label" htmlFor="amount">Amount (EGP)</label>
-        <input id="amount" name="amount" inputMode="decimal" required defaultValue={line?.amount} className="input" />
-      </div>
-      <div>
-        <label className="label" htmlFor="status">Status</label>
-        <select id="status" name="status" defaultValue={line?.status ?? "pending"} className="input">
-          {COMPENSATION_STATUSES.map((s) => <option key={s} value={s}>{COMPENSATION_STATUS_LABEL[s]}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="label" htmlFor="payment_date">Payment date (optional)</label>
-        <input id="payment_date" name="payment_date" type="date" defaultValue={line?.payment_date ?? ""} className="input" />
-      </div>
-    </div>
-  );
-}
-
-// Training Excellence enters every line by hand; nothing here is calculated. Trainers see their own on /me/compensation.
+// Training Excellence chooses the trainer and one of their assigned trainings, and types the pay; nothing here is calculated.
+// Trainers see their own lines on /me/compensation.
 export default async function CompensationPage({ searchParams }: PageProps<"/compensation">) {
   await requireRole("approver", "admin");
   const params = await searchParams;
   const trainer = isUuid(params.trainer) ? params.trainer : "";
   const editId = isUuid(params.edit) ? params.edit : "";
 
-  const [lines, trainers] = await Promise.all([
+  const [lines, trainers, assigned] = await Promise.all([
     fetchAll<CompensationLine>((from, to) => db().from("compensation_lines").select(COMPENSATION_COLUMNS).order("training_date", { ascending: false }).order("id").range(from, to)),
     fetchAll<TrainerOption>((from, to) => db().from("trainers").select("id, full_name").order("full_name").order("id").range(from, to)),
+    fetchAll<AssignedDay>((from, to) =>
+      db().from("bookings").select("id, trainer_id, date, status, program_name, day_number, batch_id, deals(company_name)").in("status", ASSIGNED_STATUSES).not("trainer_id", "is", null).order("date", { ascending: false }).order("id").range(from, to),
+    ),
   ]);
-  if (lines.error || trainers.error) {
-    console.error("[compensation]", lines.error ?? trainers.error);
+  if (lines.error || trainers.error || assigned.error) {
+    console.error("[compensation]", lines.error ?? trainers.error ?? assigned.error);
     return (
       <div className="space-y-5">
         <PageHeader kicker="Training Excellence" title={<>Compensation</>} />
@@ -79,6 +40,18 @@ export default async function CompensationPage({ searchParams }: PageProps<"/com
   const editing = editId ? lines.data.find((l) => l.id === editId) : undefined;
   const here = trainer ? `/compensation?trainer=${trainer}` : "/compensation";
 
+  // Flags days that already have a line, so a day isn't paid twice by mistake.
+  const paidFor = new Set(lines.data.filter((l) => l.id !== editing?.id).map((l) => l.booking_id));
+  const trainings: TrainingOption[] = assigned.data.map((b) => ({
+    id: b.id,
+    trainer_id: b.trainer_id,
+    label: [fmtDate(b.date, { day: "numeric", month: "short", year: "numeric" }), trainingLabel(b), b.status === "awaiting_trainer" ? "not confirmed yet" : null, paidFor.has(b.id) ? "already added" : null].filter(Boolean).join(" · "),
+  }));
+  // A line being edited keeps its training in the list, even if that day was reassigned or cancelled since.
+  if (editing?.booking_id && !assigned.data.some((b) => b.id === editing.booking_id && b.trainer_id === editing.trainer_id)) {
+    trainings.unshift({ id: editing.booking_id, trainer_id: editing.trainer_id, label: `${fmtDate(editing.training_date, { day: "numeric", month: "short", year: "numeric" })} · ${editing.training}` });
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader kicker="Training Excellence" title={<>Compensation</>} lead={<>Add what each trainer should be paid. Trainers see their own lines under My compensation.</>} />
@@ -89,7 +62,7 @@ export default async function CompensationPage({ searchParams }: PageProps<"/com
           <Form action={updateCompensation}>
             <input type="hidden" name="id" value={editing.id} />
             <input type="hidden" name="filter" value={trainer} />
-            <Fields key={editing.id} trainers={trainers.data} line={editing} trainerId={trainer} />
+            <CompensationFields key={editing.id} trainers={trainers.data} trainings={trainings} line={editing} trainerId={trainer} />
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Submit>Save changes</Submit>
               <Link href={here} className="btn-ghost">Cancel</Link>
@@ -105,7 +78,7 @@ export default async function CompensationPage({ searchParams }: PageProps<"/com
         <section className="card">
           <h2 className="h2 mb-3">Add a line</h2>
           <Form action={addCompensation} reset>
-            <Fields trainers={trainers.data} trainerId={trainer} />
+            <CompensationFields key={trainer} trainers={trainers.data} trainings={trainings} trainerId={trainer} />
             <div className="mt-4"><Submit>Add line</Submit></div>
           </Form>
         </section>
