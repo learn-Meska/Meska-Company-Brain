@@ -21,12 +21,12 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <PageHeader kicker="Bookings" title={<>All bookings</>} />
       <div className="flex flex-wrap gap-2">
-        <Link href={link({ when: "upcoming" })} className={when !== "past" ? "btn btn-sm" : "btn-ghost btn-sm"}>Upcoming</Link>
-        <Link href={link({ when: "past" })} className={when === "past" ? "btn btn-sm" : "btn-ghost btn-sm"}>Past</Link>
+        <Link href={link({ when: "upcoming" })} className={when !== "past" ? "btn btn-sm" : "btn-quiet btn-sm"}>Upcoming</Link>
+        <Link href={link({ when: "past" })} className={when === "past" ? "btn btn-sm" : "btn-quiet btn-sm"}>Past</Link>
         <span className="mx-1 w-px bg-line" />
-        <Link href={link({ status: "" })} className={!status ? "btn btn-sm" : "btn-ghost btn-sm"}>Any status</Link>
+        <Link href={link({ status: "" })} className={!status ? "btn btn-sm" : "btn-quiet btn-sm"}>Any status</Link>
         {Object.entries(STATUS_LABEL).filter(([k]) => !["pending_approval", "rejected", "declined"].includes(k)).map(([k, v]) => (
-          <Link key={k} href={link({ status: k })} className={status === k ? "btn btn-sm" : "btn-ghost btn-sm"}>{v}</Link>
+          <Link key={k} href={link({ status: k })} className={status === k ? "btn btn-sm" : "btn-quiet btn-sm"}>{v}</Link>
         ))}
       </div>
       <section className="card overflow-x-auto p-0">

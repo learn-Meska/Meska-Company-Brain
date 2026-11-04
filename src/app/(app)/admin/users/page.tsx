@@ -92,7 +92,7 @@ export default async function UsersPage() {
                   {u.id !== me.id && (
                     <Form action={removeTeamMember} className="inline">
                       <input type="hidden" name="id" value={u.id} />
-                      <Submit className="btn-ghost btn-sm text-bad" pending="Removing…">Remove</Submit>
+                      <Submit className="btn-quiet btn-sm text-bad" pending="Removing…">Remove</Submit>
                     </Form>
                   )}
                 </td>
