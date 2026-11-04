@@ -28,18 +28,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[240px_1fr]">
       <aside className="brand-gradient relative flex h-14 items-center justify-between px-4 lg:sticky lg:top-0 lg:h-screen lg:flex-col lg:items-stretch lg:justify-start lg:gap-6 lg:px-4 lg:py-6">
-        <div>
+        <div className="shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/logo-horizontal-white-text.png" alt="Meska AI" className="h-7 w-auto lg:h-8" />
           <div className="mt-1 hidden text-[10px] font-medium uppercase tracking-[0.25em] text-[#93C5FD] lg:block">Company Brain</div>
         </div>
         <Nav items={items} />
         {canSwitch && (
-          <div className="hidden lg:block">
+          <div className="hidden shrink-0 lg:block">
             <ViewSwitcher current={u.role} views={u.views} label={switchLabel} />
           </div>
         )}
-        <div className="mt-auto hidden text-xs text-[#C7D7F5] lg:block">
+        <div className="hidden shrink-0 text-xs text-[#C7D7F5] lg:block">
           <div className="font-medium text-white">{u.full_name}</div>
           <div className="truncate">{u.email}</div>
           <div className="mt-1 inline-block rounded-full bg-white/10 px-2 py-0.5">{roleLabel}</div>

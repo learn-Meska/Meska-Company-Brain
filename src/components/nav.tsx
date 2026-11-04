@@ -28,8 +28,8 @@ export function Nav({ items }: { items: NavItem[] }) {
       <button className="rounded-lg px-2 py-1 text-white lg:hidden" onClick={() => setOpen((o) => !o)} aria-label="Menu">
         ☰
       </button>
-      <nav className="hidden gap-1 lg:flex lg:flex-col">{links}</nav>
-      {open && <nav className="brand-gradient absolute inset-x-0 top-14 z-30 flex flex-col gap-1 p-3 shadow-xl lg:hidden">{links}</nav>}
+      <nav className="hidden gap-1 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:[scrollbar-color:rgb(255_255_255/0.3)_transparent] lg:[scrollbar-width:thin]">{links}</nav>
+      {open && <nav className="brand-gradient absolute inset-x-0 top-14 z-30 flex max-h-[calc(100dvh-3.5rem)] flex-col gap-1 overflow-y-auto p-3 shadow-xl lg:hidden">{links}</nav>}
     </>
   );
 }
