@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { canManageTrainers, mainRole, requireRole, requireSettingsEditor, requireTrainer, requireTrainerManager, requireUser } from "@/lib/auth";
+import { mainRole, requireRole, requireSettingsEditor, requireTrainerManager } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
 import { isUuid } from "@/lib/format";
@@ -408,32 +408,6 @@ export async function updateTrainer(fd: FormData) {
   return tagError ?? { ok: "Profile saved." + pdfNote(row) };
 }
 
-// A trainer edits their own profile with the same form an admin fills in, except what Meska controls:
-// sign-in email, active status, feedback-scorecard name and scores.
-export async function updateMyProfile(fd: FormData) {
-  const me = await requireTrainer();
-  const id = me.trainer_id;
-  const { full_name, phone, bio, title, overview, credentials, footprint_intro, footprint, expertise, thought_leadership } = trainerFields(fd);
-  const row = { full_name, phone, bio, title, overview, credentials, footprint_intro, footprint, expertise, thought_leadership };
-  if (!row.full_name) return { error: "Enter your name." };
-  if (row.full_name.length > 120) return { error: "Keep the name under 120 characters." };
-  const { error } = await db().from("trainers").update(row).eq("id", id);
-  if (error) return failed("updateMyProfile", error);
-  const tagError = await saveTrainerTags(id, fd);
-  await db().from("app_users").update({ full_name: row.full_name }).eq("id", me.id);
-  await audit(me.id, "trainer_self_updated", null, { id, name: row.full_name });
-  revalidatePath(`/trainers/${id}`);
-  revalidatePath("/me/profile");
-  return tagError ?? { ok: "Profile saved." + pdfNote({ ...row, email: null, active: true, feedback_name: null }) };
-}
-
-// A manager may change anyone's files; a trainer only their own.
-async function requireFileAccess(trainerId: string) {
-  const u = await requireUser();
-  if (!canManageTrainers(u) && !(u.trainer_id && u.trainer_id === trainerId)) redirect("/");
-  return u;
-}
-
 export async function saveTrainerScores(fd: FormData) {
   await requireTrainerManager();
   const id = str(fd, "id");
@@ -566,7 +540,7 @@ const FILE_BUCKET = { photo: "photos", cv: "cvs" } as const;
 // Files go straight from the browser to storage with a one-time signed URL (no server size limit).
 export async function createTrainerFileUpload(trainerId: string, kind: TrainerFile, fileName: string) {
   if (!isUuid(trainerId) || (kind !== "photo" && kind !== "cv")) return { error: "Trainer not found." };
-  await requireFileAccess(trainerId);
+  await requireTrainerManager();
   const { data: exists } = await db().from("trainers").select("id").eq("id", trainerId).maybeSingle();
   if (!exists) return { error: "Trainer not found." };
   const lower = String(fileName).toLowerCase();
@@ -579,7 +553,7 @@ export async function createTrainerFileUpload(trainerId: string, kind: TrainerFi
 
 export async function saveTrainerFile(trainerId: string, kind: TrainerFile, path: string, fileName: string) {
   if (!isUuid(trainerId) || (kind !== "photo" && kind !== "cv")) return { error: "Trainer not found." };
-  const me = await requireFileAccess(trainerId);
+  const me = await requireTrainerManager();
   // Only a path this app handed out for that trainer and kind.
   if (!new RegExp(`^${trainerId}/${kind}-\\d+\\.(png|jpg|pdf|docx?)$`).test(path)) return { error: "Invalid upload." };
   const col = kind === "photo" ? "photo_path" : "cv_path";
@@ -592,7 +566,6 @@ export async function saveTrainerFile(trainerId: string, kind: TrainerFile, path
   if (kind === "cv") await audit(me.id, "trainer_cv_uploaded", null, { id: trainerId, file: fileName });
   revalidatePath(`/trainers/${trainerId}`);
   revalidatePath(`/trainers/${trainerId}/edit`);
-  revalidatePath("/me/profile");
   return { ok: kind === "photo" ? "Photo updated." : "CV uploaded." };
 }
 

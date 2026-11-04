@@ -6,8 +6,7 @@ import { TrainerCreateForm } from "@/components/trainer-create-form";
 
 type Lookup = { id: string; kind: string; name: string };
 
-// self: a trainer editing their own profile, so the fields Meska controls (email, status, scorecard name) are left out
-export async function TrainerForm({ action, t, self = false }: { action?: (fd: FormData) => Promise<ActionResult>; t?: TrainerProfile; self?: boolean }) {
+export async function TrainerForm({ action, t }: { action?: (fd: FormData) => Promise<ActionResult>; t?: TrainerProfile }) {
   const [{ data: skills }, { data: lookups }] = await Promise.all([
     db().from("skills").select("*").order("name"),
     db().from("lookups").select("*").order("sort"),
@@ -22,31 +21,25 @@ export async function TrainerForm({ action, t, self = false }: { action?: (fd: F
           <label className="label">Full name *</label>
           <input name="full_name" required defaultValue={t?.full_name} className="input" />
         </div>
-        {!self && (
-          <div>
-            <label className="label">Email (used for the invitation and booking emails)</label>
-            <input name="email" type="email" defaultValue={t?.email ?? ""} className="input" />
-          </div>
-        )}
+        <div>
+          <label className="label">Email (used for the invitation and booking emails)</label>
+          <input name="email" type="email" defaultValue={t?.email ?? ""} className="input" />
+        </div>
         <div>
           <label className="label">Phone</label>
           <input name="phone" defaultValue={t?.phone ?? ""} className="input" />
         </div>
-        {!self && (
-          <>
-            <div>
-              <label className="label">Status</label>
-              <select name="active" defaultValue={t && !t.active ? "off" : "on"} className="input">
-                <option value="on">Active, can be booked</option>
-                <option value="off">Inactive, hidden from booking</option>
-              </select>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="label" htmlFor="feedback_name">Name in the feedback scorecard (only if spelled differently)</label>
-              <input id="feedback_name" name="feedback_name" defaultValue={t?.feedback_name ?? ""} placeholder="e.g. Yassmine Nasser" className="input" />
-            </div>
-          </>
-        )}
+        <div>
+          <label className="label">Status</label>
+          <select name="active" defaultValue={t && !t.active ? "off" : "on"} className="input">
+            <option value="on">Active, can be booked</option>
+            <option value="off">Inactive, hidden from booking</option>
+          </select>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label" htmlFor="feedback_name">Name in the feedback scorecard (only if spelled differently)</label>
+          <input id="feedback_name" name="feedback_name" defaultValue={t?.feedback_name ?? ""} placeholder="e.g. Yassmine Nasser" className="input" />
+        </div>
         <div className="sm:col-span-2">
           <label className="label" htmlFor="title">Job title (shown under the name on the profile PDF)</label>
           <input id="title" name="title" defaultValue={t?.title ?? ""} placeholder="e.g. Director of Learning & Development, Meska AI" className="input" />
