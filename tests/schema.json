@@ -57,6 +57,7 @@
   "compensation_lines": [
     "id",
     "trainer_id",
+    "booking_id",
     "training_date",
     "training",
     "hours",
