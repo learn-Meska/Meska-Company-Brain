@@ -1,7 +1,7 @@
 // Rules for the Training Excellence dashboard: how days become trainings, and where each training stands.
 
 import { describe, expect, it } from "vitest";
-import { buildTrainings, confirmationLabel, contentOpen, contentState, cycleStage, isDeclined, matchesWhen, needsAttention, type CycleDay, type CycleDeal, type Stage } from "@/lib/cycle";
+import { buildTrainings, confirmationLabel, contentOpen, contentState, cycleStage, isDeclined, needsAttention, type CycleDay, type CycleDeal, type Stage } from "@/lib/cycle";
 import { checkAudioFile, isAudioPath } from "@/lib/files";
 
 const TODAY = "2026-11-10";
@@ -19,8 +19,11 @@ function day(over: Partial<CycleDay> = {}): CycleDay {
     program_name: "AI in HR",
     day_number: 1,
     date: LATER,
+    start_time: "10:00:00",
+    end_time: "15:00:00",
     status: "confirmed",
     trainer_id: "t1",
+    industry: { name: "Fintech" },
     created_by: "u1",
     created_at: "2026-10-01T10:00:00Z",
     trainer_comment: null,
@@ -226,18 +229,25 @@ describe("order and the Active / Past filter", () => {
     const recent = day({ date: "2026-11-05", program_name: "recent" });
     expect(build([recent, far, oldest, soon, urgent]).map((r) => r.program)).toEqual(["urgent", "soon", "far", "recent", "oldest"]);
   });
-  it("delivered and cancelled are past, the rest are active, all has everything", () => {
-    for (const stage of ["delivered", "cancelled"] as const) {
-      expect(matchesWhen({ stage }, "past")).toBe(true);
-      expect(matchesWhen({ stage }, "active")).toBe(false);
-      expect(matchesWhen({ stage }, "all")).toBe(true);
-    }
-    for (const stage of ["needs_trainer", "waiting_trainer", "scheduled", "in_delivery", "report_due"] as const) {
-      expect(matchesWhen({ stage }, "active")).toBe(true);
-      expect(matchesWhen({ stage }, "past")).toBe(false);
-      expect(matchesWhen({ stage }, "all")).toBe(true);
-    }
+  it("every training has one status, so the status counts add up to the total", () => {
+    const rows = build([day(), day({ status: "awaiting_trainer" }), day({ status: "needs_trainer", trainer_id: null }), day({ date: PAST }), day({ status: "cancelled" })]);
+    expect(new Set(rows.map((r) => r.stage)).size).toBe(5);
   });
+});
+
+describe("date, company and industry", () => {
+  it("shows the first and last live day, and the industry", () => {
+    const a = day({ batch_id: "x", day_number: 1, date: "2026-11-20", start_time: "18:00:00" });
+    const b = day({ batch_id: "x", day_number: 2, date: "2026-11-15" });
+    const [row] = build([a, b, day({ batch_id: "x", day_number: 3, date: "2026-11-01", status: "cancelled" })]);
+    expect(row.firstDate).toBe("2026-11-15");
+    expect(row.firstDay.id).toBe(b.id);
+    expect(row.industry).toBe("Fintech");
+  });
+  it("a fully cancelled training keeps the dates it was booked for", () => {
+    expect(build([day({ status: "cancelled", date: "2026-11-01" })])[0].firstDate).toBe("2026-11-01");
+  });
+  it("a booking with no industry stays empty", () => expect(build([day({ industry: null })])[0].industry).toBeNull());
 });
 
 describe("training audio", () => {

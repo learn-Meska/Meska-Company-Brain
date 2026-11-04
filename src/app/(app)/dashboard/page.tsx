@@ -1,27 +1,25 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { requireRole } from "@/lib/auth";
-import { buildTrainings, CONTENT_LABEL, contentOpen, isLive, isStage, matchesWhen, STAGE_LABEL, WHEN_OPTIONS, type CycleDay, type CycleDeal, type Stage, type Training, type When } from "@/lib/cycle";
+import { buildTrainings, CONTENT_LABEL, isStage, STAGE_LABEL, type CycleDay, type CycleDeal, type Stage, type Training } from "@/lib/cycle";
 import { isAudioPath } from "@/lib/files";
-import { isUuid, todayISO } from "@/lib/format";
+import { fmtDate, fmtTime, isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
 import { fmtNps } from "@/lib/survey";
 import { CONTENT_STYLE, STAGE_STYLE } from "./styles";
 
-const WHEN_LABEL: Record<When, string> = { active: "Active", past: "Past", all: "All" };
-const TILES: Stage[] = ["needs_trainer", "waiting_trainer", "scheduled", "report_due", "delivered"];
+const TILES: Stage[] = ["needs_trainer", "waiting_trainer", "scheduled", "in_delivery", "report_due", "delivered", "cancelled"];
 
 // Every training for every trainer, and where each one stands. Click a training for its details, reassign or cancel.
 export default async function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
   await requireRole("approver", "admin");
   const params = await searchParams;
-  const stage = params.stage === "attention" || params.stage === "needs_content" || isStage(params.stage) ? params.stage : null;
-  const when = WHEN_OPTIONS.find((w) => w === params.when) ?? "active";
+  const stage = isStage(params.stage) ? params.stage : null;
   const growth = isUuid(params.growth) ? params.growth : "";
   const trainer = isUuid(params.trainer) ? params.trainer : "";
 
   const [days, deals, files, feedback, audio, users] = await Promise.all([
-    fetchAll<CycleDay>((from, to) => db().from("bookings").select("id, deal_id, batch_id, program_name, day_number, date, status, trainer_id, created_by, created_at, trainer_comment, trainer_responded_at, finished_at, brief_submitted_at, trainers(full_name)").order("id").range(from, to)),
+    fetchAll<CycleDay>((from, to) => db().from("bookings").select("id, deal_id, batch_id, program_name, day_number, date, start_time, end_time, status, trainer_id, created_by, created_at, trainer_comment, trainer_responded_at, finished_at, brief_submitted_at, trainers(full_name), industry:lookups!bookings_industry_id_fkey(name)").order("id").range(from, to)),
     fetchAll<CycleDeal>((from, to) => db().from("deals").select("id, company_name, content_guide, content_submitted_at, created_at").order("id").range(from, to)),
     fetchAll<{ deal_id: string }>((from, to) => db().from("deal_content").select("deal_id").order("id").range(from, to)),
     fetchAll<{ booking_id: string; recommend: number | null }>((from, to) => db().from("feedback_responses").select("booking_id, recommend").order("id").range(from, to)),
@@ -39,7 +37,6 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     );
   }
 
-  const today = todayISO();
   const trainings = buildTrainings({
     days: days.data,
     deals: deals.data,
@@ -47,7 +44,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     feedback: feedback.data,
     audioBookingIds: audio.data.filter((a) => isAudioPath(a.file_path)).map((a) => a.booking_id),
     names: new Map(users.data.map((u) => [u.id, u.full_name])),
-    today,
+    today: todayISO(),
   });
 
   const requesters = new Map<string, string>();
@@ -58,21 +55,18 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   }
   const byName = (a: [string, string], b: [string, string]) => a[1].localeCompare(b[1]);
 
-  // Tiles count across all dates, so a tile and the list it opens always agree.
+  // Each training has one status, so the status tiles always add up to "All trainings".
   const scoped = trainings.filter((t) => (!growth || t.requestedBy === growth) && (!trainer || t.trainers.some((x) => x.id === trainer)));
-  const needsContent = (t: Training) => contentOpen(t.content, t.days.filter(isLive), today);
-  const rows = stage
-    ? scoped.filter((t) => (stage === "attention" ? t.attention : stage === "needs_content" ? needsContent(t) : t.stage === stage))
-    : scoped.filter((t) => matchesWhen(t, when));
+  const rows = stage ? scoped.filter((t) => t.stage === stage) : scoped;
 
   const link = (p: Record<string, string>) => {
     const q = new URLSearchParams({ ...(growth ? { growth } : {}), ...(trainer ? { trainer } : {}), ...p }).toString();
     return q ? `/dashboard?${q}` : "/dashboard";
   };
-  const tile = (key: string, label: string, n: number, hot = false) => (
-    <Link key={key} href={stage === key ? link({}) : link({ stage: key })} className={`rounded-xl p-3 transition hover:brightness-95 ${hot ? "stat-hot text-white" : "border border-ice2 bg-ice"} ${stage === key ? "ring-2 ring-royal ring-offset-2" : ""}`}>
-      <div className={`text-2xl font-bold tabular-nums ${hot ? "" : "text-royal-deep"}`}>{n}</div>
-      <div className={`text-[10.5px] font-medium uppercase tracking-wider ${hot ? "text-[#93C5FD]" : "text-[#3B82F6]"}`}>{label}</div>
+  const tile = (key: Stage | null, label: string, n: number) => (
+    <Link key={key ?? "all"} href={key ? link({ stage: key }) : link({})} className={`rounded-xl p-3 transition hover:brightness-95 ${key ? "border border-ice2 bg-ice" : "stat-hot text-white"} ${stage === key ? "ring-2 ring-royal ring-offset-2" : ""}`}>
+      <div className={`text-2xl font-bold tabular-nums ${key ? "text-royal-deep" : ""}`}>{n}</div>
+      <div className={`text-[10.5px] font-medium uppercase tracking-wider ${key ? "text-[#3B82F6]" : "text-[#93C5FD]"}`}>{label}</div>
     </Link>
   );
 
@@ -80,40 +74,32 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     <div className="space-y-5">
       <PageHeader kicker="Training Excellence" title={<>Dashboard</>} lead={<>Every training for every trainer. Click a training to see its details, reassign the trainer or cancel it.</>} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
-        {tile("attention", "Needs attention", scoped.filter((t) => t.attention).length, true)}
-        {tile("needs_content", "Needs content", scoped.filter(needsContent).length)}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+        {tile(null, "All trainings", scoped.length)}
         {TILES.map((s) => tile(s, STAGE_LABEL[s], scoped.filter((t) => t.stage === s).length))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {WHEN_OPTIONS.map((w) => (
-          <Link key={w} href={link({ when: w })} className={!stage && when === w ? "btn btn-sm" : "btn-ghost btn-sm"}>{WHEN_LABEL[w]}</Link>
-        ))}
-        <span className="mx-1 h-6 w-px bg-line" />
-        <form className="flex flex-wrap gap-2" action="/dashboard">
-          {stage && <input type="hidden" name="stage" value={stage} />}
-          {!stage && when !== "active" && <input type="hidden" name="when" value={when} />}
-          <select name="growth" defaultValue={growth} className="input w-44 py-1.5" aria-label="Growth lead">
-            <option value="">All Growth leads</option>
-            {[...requesters.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
-          <select name="trainer" defaultValue={trainer} className="input w-44 py-1.5" aria-label="Trainer">
-            <option value="">All trainers</option>
-            {[...trainerOptions.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
-          <button className="btn-ghost btn-sm">Filter</button>
-        </form>
-        {(stage || growth || trainer || when !== "active") && <Link href="/dashboard" className="text-sm text-blue hover:underline">Clear</Link>}
-      </div>
+      <form className="flex flex-wrap items-center gap-2" action="/dashboard">
+        {stage && <input type="hidden" name="stage" value={stage} />}
+        <select name="growth" defaultValue={growth} className="input w-44 py-1.5" aria-label="Growth lead">
+          <option value="">All Growth leads</option>
+          {[...requesters.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <select name="trainer" defaultValue={trainer} className="input w-44 py-1.5" aria-label="Trainer">
+          <option value="">All trainers</option>
+          {[...trainerOptions.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <button className="btn-ghost btn-sm">Filter</button>
+        {(stage || growth || trainer) && <Link href="/dashboard" className="text-sm text-blue hover:underline">Clear</Link>}
+      </form>
 
       <section className="card overflow-x-auto p-0">
         <table className="table">
           <thead>
-            <tr><th>Training</th><th>Growth lead</th><th>Trainer</th><th>Trainer confirmation</th><th>Content</th><th>Training status</th><th>Feedback score</th></tr>
+            <tr><th>Date</th><th>Company</th><th>Training</th><th>Industry</th><th>Growth lead</th><th>Trainer</th><th>Trainer confirmation</th><th>Content</th><th>Training status</th><th>Feedback score</th></tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={7} className="py-8 text-center text-muted">No trainings here.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-muted">No trainings here.</td></tr>}
             {rows.map((t) => <TrainingRow key={t.key} t={t} />)}
           </tbody>
         </table>
@@ -128,12 +114,18 @@ function TrainingRow({ t }: { t: Training }) {
   const dayCount = t.live || t.days.length;
   return (
     <tr>
-      <td>
-        <Link href={`/dashboard/${t.linkId}`} className="font-medium text-blue hover:underline">{t.company ?? t.program}</Link>
-        <div className="text-xs text-muted">{t.company ? `${t.program} · ` : ""}{dayCount} {dayCount === 1 ? "day" : "days"}</div>
+      <td className="whitespace-nowrap">
+        {fmtDate(t.firstDate, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+        <div className="text-xs text-muted">{dayCount > 1 ? `Until ${fmtDate(t.lastDate, { day: "numeric", month: "short", year: "numeric" })}` : `${fmtTime(t.firstDay.start_time)} – ${fmtTime(t.firstDay.end_time)}`}</div>
       </td>
+      <td className="text-sm">{t.company ?? <span className="text-muted">—</span>}</td>
+      <td>
+        <Link href={`/dashboard/${t.linkId}`} className="font-medium text-blue hover:underline">{t.program}</Link>
+        <div className="text-xs text-muted">{dayCount} {dayCount === 1 ? "day" : "days"}</div>
+      </td>
+      <td className="text-xs text-muted">{t.industry ?? "—"}</td>
       <td className="text-sm">{t.requestedByName ?? "—"}</td>
-      <td className="text-sm">{t.trainers.length ? t.trainers.map((x) => x.name).join(", ") : <span className="text-muted">Not assigned</span>}</td>
+      <td className="text-sm">{t.trainers.length ? t.trainers.map((x) => x.name).join(", ") : <span className="text-[#B4235A]">Not assigned</span>}</td>
       <td><span className={`badge whitespace-nowrap ${confirmStyle(t.confirmation)}`}>{t.confirmation}</span></td>
       <td>{t.content === "none" ? <span className="text-muted">—</span> : <span className={`badge whitespace-nowrap ${CONTENT_STYLE[t.content]}`}>{CONTENT_LABEL[t.content]}</span>}</td>
       <td>

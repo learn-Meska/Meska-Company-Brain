@@ -29,7 +29,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   const showReason = me.role === "admin";
   return (
     <div className="space-y-5">
-      <Link href="/bookings" className="text-sm text-blue hover:underline">← All bookings</Link>
+      {canBook(me) ? <Link href={`/dashboard/${b.id}`} className="text-sm text-blue hover:underline">← Dashboard</Link> : <Link href="/bookings" className="text-sm text-blue hover:underline">← All bookings</Link>}
       {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and Training Excellence was notified." : "Request sent. It's on the calendar as “Needs a trainer” and Training Excellence was notified."}</p>}
       {b.status === "needs_trainer" && canBook(me) && (
         <section className="card border-2 border-[#F4A9C4]">

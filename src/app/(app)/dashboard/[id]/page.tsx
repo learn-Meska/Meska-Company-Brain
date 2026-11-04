@@ -69,6 +69,8 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
   const facts: [string, React.ReactNode][] = [
     ["Growth lead", t.requestedByName ?? "—"],
     ["Requested", fmtDateTime(t.requestedAt)],
+    ["Company", t.company ?? "—"],
+    ["Industry", t.industry ?? "—"],
     ["Number of days", t.live || t.days.length],
     ["Trainer", t.trainers.length ? t.trainers.map((x) => x.name).join(", ") : "Not assigned"],
     ["Trainer confirmation", t.confirmation],

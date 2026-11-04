@@ -11,9 +11,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     items.push({ href: "/content", label: "Content requests" });
   } else if (u.role !== "trainer") {
     if (canBook(u)) items.push({ href: "/dashboard", label: "Dashboard" });
-    items.push({ href: "/request", label: u.role === "growth" ? "New deal" : "Request a training" });
+    // Training Excellence and admins follow every training on the dashboard; Growth sends deals and has its own list.
+    if (u.role === "growth") items.push({ href: "/request", label: "New deal" });
     if (canBook(u)) items.push({ href: "/find", label: "Find a trainer" });
-    items.push({ href: "/calendar", label: "Calendar" }, { href: "/bookings", label: "All bookings" }, { href: "/trainers", label: "Trainers" });
+    items.push({ href: "/calendar", label: "Calendar" });
+    if (u.role === "growth") items.push({ href: "/bookings", label: "All bookings" });
+    items.push({ href: "/trainers", label: "Trainers" });
     if (u.role === "admin") items.push({ href: "/content", label: "Content requests" });
     if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
     else if (canEditSettings(u)) items.push({ href: "/admin/settings", label: "Scoring & lists" });

@@ -11,8 +11,11 @@ export type CycleDay = {
   program_name: string;
   day_number: number;
   date: string;
+  start_time: string;
+  end_time: string;
   status: string;
   trainer_id: string | null;
+  industry: { name: string } | null;
   created_by: string | null;
   created_at: string;
   trainer_comment: string | null;
@@ -31,7 +34,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   waiting_trainer: "Waiting on trainer",
   scheduled: "Scheduled",
   in_delivery: "In delivery",
-  report_due: "Delivery report due",
+  report_due: "Report due",
   delivered: "Delivered",
   cancelled: "Cancelled",
 };
@@ -43,6 +46,7 @@ export type Training = {
   key: string;
   company: string | null;
   program: string;
+  industry: string | null;
   linkId: string;
   requestedBy: string | null;
   requestedByName: string | null;
@@ -57,7 +61,9 @@ export type Training = {
   audios: number;
   trainers: { id: string; name: string }[];
   nextDate: string | null;
+  firstDate: string;
   lastDate: string;
+  firstDay: CycleDay;
   started: boolean;
   responses: number;
   score: number | null;
@@ -155,6 +161,8 @@ export function buildTrainings(input: {
     const trainers = new Map<string, string>();
     for (const d of live) if (d.trainer_id && d.trainers) trainers.set(d.trainer_id, d.trainers.full_name);
     const dates = live.map((d) => d.date).sort();
+    // A fully cancelled training still shows the dates it was booked for.
+    const shown = [...(live.length ? live : sorted)].sort((a, b) => a.date.localeCompare(b.date));
     const allDates = sorted.map((d) => d.date).sort();
     const ids = new Set(sorted.map((d) => d.id));
     const responses = feedback.filter((f) => ids.has(f.booking_id));
@@ -162,6 +170,7 @@ export function buildTrainings(input: {
       key,
       company: deal?.company_name || null,
       program: first.program_name,
+      industry: first.industry?.name ?? null,
       linkId: first.id,
       requestedBy: first.created_by,
       requestedByName: first.created_by ? names.get(first.created_by) ?? null : null,
@@ -176,7 +185,9 @@ export function buildTrainings(input: {
       audios: live.filter((d) => withAudio.has(d.id)).length,
       trainers: [...trainers.entries()].map(([id, name]) => ({ id, name })),
       nextDate: dates.find((d) => d >= today) ?? null,
+      firstDate: shown[0].date,
       lastDate: allDates[allDates.length - 1],
+      firstDay: shown[0],
       started: dates.some((d) => d <= today),
       responses: responses.length,
       score: nps(responses.map((f) => f.recommend).filter((x): x is number => x != null)),
@@ -188,12 +199,4 @@ export function buildTrainings(input: {
   return out.sort(compareTrainings);
 }
 
-export const WHEN_OPTIONS = ["active", "past", "all"] as const;
-export type When = (typeof WHEN_OPTIONS)[number];
 export const isStage = (s: unknown): s is Stage => typeof s === "string" && Object.hasOwn(STAGE_LABEL, s);
-
-const isClosed = (t: Pick<Training, "stage">) => t.stage === "delivered" || t.stage === "cancelled";
-
-export function matchesWhen(t: Pick<Training, "stage">, when: When) {
-  return when === "all" || (when === "past") === isClosed(t);
-}
