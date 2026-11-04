@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (u.role === "content") {
     items.push({ href: "/content", label: "Content requests" });
   } else if (u.role !== "trainer") {
-    if (canBook(u)) items.push({ href: "/dashboard", label: "Dashboard" });
+    if (canBook(u)) items.push({ href: "/dashboard", label: "Dashboard" }, { href: "/compensation", label: "Compensation" });
     // Training Excellence and admins follow every training on the dashboard; Growth sends deals and has its own list.
     if (u.role === "growth") items.push({ href: "/request", label: "New deal" });
     if (canBook(u)) items.push({ href: "/find", label: "Find a trainer" });
@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Staff who also deliver trainings (e.g. the L&D director) get the trainer pages too.
   if (u.trainer_id && (u.role === u.real_role || u.role === "trainer")) {
     const p = u.role === "trainer" ? "My" : "My trainer";
-    items.push({ href: "/me", label: `${p} profile` }, { href: "/me/calendar", label: "My calendar" }, { href: "/me/availability", label: "My availability" }, { href: "/me/bookings", label: "My trainings" });
+    items.push({ href: "/me", label: `${p} profile` }, { href: "/me/calendar", label: "My calendar" }, { href: "/me/availability", label: "My availability" }, { href: "/me/bookings", label: "My trainings" }, { href: "/me/compensation", label: "My compensation" });
   }
   const roleLabel = ROLE_LABEL[u.role];
   const canSwitch = u.views.length > 1;

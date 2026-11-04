@@ -54,6 +54,20 @@
     "created_by",
     "created_at"
   ],
+  "compensation_lines": [
+    "id",
+    "trainer_id",
+    "training_date",
+    "training",
+    "hours",
+    "rate",
+    "amount",
+    "status",
+    "payment_date",
+    "created_by",
+    "created_at",
+    "updated_at"
+  ],
   "deal_content": [
     "id",
     "deal_id",
