@@ -10,9 +10,8 @@ export default async function MyAvailabilityPage({ searchParams }: PageProps<"/m
   if (!me.trainer_id) return <p className="card">Your login isn&apos;t linked to a trainer profile yet. Please contact the admin.</p>;
   const { m } = await searchParams;
   const today = todayISO();
-  const nextMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 1)).toISOString().slice(0, 7);
-  // Past months can't be edited, so they aren't offered either.
-  const month = isMonth(m) && m >= today.slice(0, 7) ? m : nextMonth;
+  // Opens on the current month; the arrows move on to next month. Past months can't be edited, so they aren't offered.
+  const month = isMonth(m) && m >= today.slice(0, 7) ? m : today.slice(0, 7);
   const [y, mm] = month.split("-").map(Number);
   const start = `${month}-01`;
   const end = new Date(Date.UTC(y, mm, 0)).toISOString().slice(0, 10);

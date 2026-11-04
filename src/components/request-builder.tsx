@@ -29,6 +29,15 @@ const PRESETS = [
   { label: "Evening 6 PM – 10 PM", start: "18:00", end: "22:00" },
 ];
 
+// Opens the trainer's profile PDF (the document Growth shares with clients).
+function ProfileLink({ id }: { id: string }) {
+  return (
+    <a href={`/trainers/${id}/bio`} className="btn-ghost btn-sm whitespace-nowrap" title="Download this trainer's profile (PDF)">
+      ⬇ Profile
+    </a>
+  );
+}
+
 function addDays(d: string, n: number) {
   const x = new Date(d + "T00:00:00Z");
   x.setUTCDate(x.getUTCDate() + n);
@@ -303,21 +312,40 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                 ) : opts[i].length === 0 ? (
                   <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No matching trainer is free at this time. Try another date or time{trainerRequired ? ", or contact Training Excellence" : ""}.</p>
                 ) : (
-                  <select
-                    id={`t${d.key}`}
-                    className="input"
-                    value={d.trainerId}
-                    disabled={!!sameId}
-                    onChange={(e) => patch(d.key, { trainerId: e.target.value })}
-                  >
-                    <option value="">{trainerRequired ? "Choose a trainer…" : "Leave to Training Excellence"}</option>
-                    {opts[i].map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.full_name}
-                        {t.title ? ` — ${t.title}` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <div className="flex items-center gap-2">
+                      <select
+                        id={`t${d.key}`}
+                        className="input"
+                        value={d.trainerId}
+                        disabled={!!sameId}
+                        onChange={(e) => patch(d.key, { trainerId: e.target.value })}
+                      >
+                        <option value="">{trainerRequired ? "Choose a trainer…" : "Leave to Training Excellence"}</option>
+                        {opts[i].map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.full_name}
+                            {t.title ? ` — ${t.title}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {d.trainerId && <ProfileLink id={d.trainerId} />}
+                    </div>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-muted">Available trainers ({opts[i].length}) · download profiles</summary>
+                      <ul className="mt-1.5 space-y-1">
+                        {opts[i].map((t) => (
+                          <li key={t.id} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-3 py-1.5 text-sm">
+                            <span>
+                              {t.full_name}
+                              {t.title && <span className="text-xs text-muted"> — {t.title}</span>}
+                            </span>
+                            <ProfileLink id={t.id} />
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </>
                 )}
               </div>
             </div>
@@ -338,17 +366,20 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
             </label>
             {same &&
               (opts && common.length ? (
-                <select
-                  className="input w-auto py-1.5"
-                  aria-label="Trainer for all days"
-                  value={sameId}
-                  onChange={(e) => setDays((ds) => ds.map((d) => ({ ...d, trainerId: e.target.value })))}
-                >
-                  <option value="">Choose a trainer free on all days…</option>
-                  {common.map((t) => (
-                    <option key={t.id} value={t.id}>{t.full_name}</option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    className="input w-auto py-1.5"
+                    aria-label="Trainer for all days"
+                    value={sameId}
+                    onChange={(e) => setDays((ds) => ds.map((d) => ({ ...d, trainerId: e.target.value })))}
+                  >
+                    <option value="">Choose a trainer free on all days…</option>
+                    {common.map((t) => (
+                      <option key={t.id} value={t.id}>{t.full_name}</option>
+                    ))}
+                  </select>
+                  {sameId && <ProfileLink id={sameId} />}
+                </>
               ) : (
                 <span className="text-xs text-muted">{opts ? "No trainer is free on all these days." : "Fill in the days to see who is free on all of them."}</span>
               ))}
