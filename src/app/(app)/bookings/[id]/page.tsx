@@ -61,7 +61,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
         <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
           <section className="card">
             <h2 className="h2 mb-1">Edit training</h2>
-            <p className="mb-3 text-xs text-muted">The trainer, admins and Training Excellence are notified of what changed. To change the trainer, cancel and book again.</p>
+            <p className="mb-3 text-xs text-muted">The trainer, admins and Training Excellence are notified of what changed. {canBook(me) ? <>To change the trainer, open the training on the <Link href={`/dashboard/${b.id}`} className="text-blue hover:underline">dashboard</Link>.</> : "To change the trainer, cancel and book again."}</p>
             <Form action={editBooking} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="id" value={b.id} />
               <div className="sm:col-span-2 grid grid-cols-[1fr_90px] gap-3">

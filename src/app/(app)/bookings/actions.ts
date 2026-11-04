@@ -9,7 +9,7 @@ import { trainingIcs } from "@/lib/ics";
 import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, programVisible, slotsFor, todayISO, trainerTitle } from "@/lib/format";
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
-import { checkFile, safeName } from "@/lib/files";
+import { checkAudioFile, checkFile, isAudioPath, safeName } from "@/lib/files";
 import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, userWithRole, type BookingRow } from "@/lib/notify";
 import {
   contactError,
@@ -37,7 +37,7 @@ const ACTIVE = ["needs_trainer", "pending_approval", "awaiting_trainer", "confir
 
 
 function refresh() {
-  for (const p of ["/bookings", "/calendar", "/me", "/me/bookings", "/me/availability"]) revalidatePath(p);
+  for (const p of ["/bookings", "/calendar", "/dashboard", "/me", "/me/bookings", "/me/availability"]) revalidatePath(p);
 }
 
 const title = (b: BookingRow) => `${b.program_name} — Day ${b.day_number}`;
@@ -241,7 +241,8 @@ export async function requestCandidates(bookingId: string) {
   await requireRole("admin", "approver");
   const [b] = await loadBookings([bookingId]);
   if (!b) return { error: "Request not found." };
-  const days = b.batch_id ? (await loadBatch(b.batch_id)).filter((d) => d.status === "needs_trainer") : [b];
+  // Days that already went by can't be assigned, so a training reassigned partway only asks for the days left.
+  const days = b.batch_id ? (await loadBatch(b.batch_id)).filter((d) => d.status === "needs_trainer" && d.date >= todayISO()) : [b];
   const lists = await Promise.all(
     days.map((d) => searchTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5), audienceId: d.audience_id ?? "", functionId: d.function_id ?? "", industryId: d.industry_id ?? "", skillIds: d.skill_ids })),
   );
@@ -607,6 +608,100 @@ export async function proposalLink(dealId: string) {
   return { url: s.signedUrl };
 }
 
+/* ---------- A whole training: reassign or cancel ---------- */
+
+// Every day of the training this booking belongs to: its deal, else its batch, else just itself.
+async function trainingDays(b: BookingRow) {
+  if (!b.deal_id && !b.batch_id) return [b];
+  const q = db().from("bookings").select(BOOKING_SELECT);
+  const { data } = await (b.deal_id ? q.eq("deal_id", b.deal_id) : q.eq("batch_id", b.batch_id!)).order("day_number");
+  return (data ?? []) as BookingRow[];
+}
+
+function refreshTraining() {
+  refresh();
+  revalidatePath("/dashboard", "layout");
+  revalidatePath("/bookings", "layout");
+}
+
+// Takes the trainer off the days still to come. The days go back to "Needs a trainer", ready for assignTrainer.
+export async function reassignTraining(fd: FormData) {
+  const me = await requireRole("admin", "approver");
+  const [b] = await loadBookings([String(fd.get("id"))]);
+  if (!b) return { error: "Training not found." };
+  const today = todayISO();
+  const targets = (await trainingDays(b)).filter((d) => d.trainer_id && !d.finished_at && d.date >= today && ["awaiting_trainer", "confirmed"].includes(d.status));
+  if (!targets.length) return { error: "No upcoming day has a trainer to replace." };
+  const released: BookingRow[] = [];
+  let failure: string | null = null;
+  for (const d of targets) {
+    const { data, error } = await db()
+      .from("bookings")
+      .update({ status: "needs_trainer", trainer_id: null, approver_id: null, decided_at: null, reminder_sent_at: null, trainer_comment: null, trainer_responded_at: null })
+      .eq("id", d.id)
+      .eq("status", d.status)
+      .eq("trainer_id", d.trainer_id!)
+      .select("id");
+    if (error) {
+      failure = friendlyError(error.message);
+      break;
+    }
+    if (data?.length) released.push(d);
+  }
+  for (const d of released) {
+    await audit(me.id, "trainer_removed", d.id, { program: title(d), trainer: d.trainers?.full_name });
+    await notify([await trainerRecipient(d)], {
+      title: `You are no longer assigned: ${trainerTitle(d)}`,
+      body: when(d),
+      link: "/me/bookings",
+      email: {
+        subject: `Training reassigned — ${fmtDate(d.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        intro: "You are no longer assigned to the following training. The slot is free again in your calendar.",
+        rows: bookingRows(d, true),
+        attachments: [{ filename: "meska-training-cancelled.ics", content: trainingIcs(d, `${siteUrl()}/me/bookings`, true), contentType: "text/calendar; charset=utf-8; method=CANCEL" }],
+      },
+    });
+  }
+  if (released.length) {
+    await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
+      title: `${me.full_name} is reassigning ${b.program_name}`,
+      body: `${released.length} ${released.length === 1 ? "day needs" : "days need"} a trainer.`,
+      link: `/dashboard/${b.id}`,
+    });
+  }
+  refreshTraining();
+  if (failure) return { error: released.length ? `${released.length} of ${targets.length} days were released. ${failure}` : failure };
+  if (!released.length) return { error: "This training changed in the meantime. Refresh the page and try again." };
+  return { ok: "Trainer removed and told. Choose the new trainer above." };
+}
+
+// Cancels what is left of a training. Delivered days, and past days the trainer had confirmed, stay on record.
+export async function cancelTraining(fd: FormData) {
+  await requireRole("admin", "approver");
+  const [b] = await loadBookings([String(fd.get("id"))]);
+  if (!b) return { error: "Training not found." };
+  const today = todayISO();
+  // Earliest first: that day has the strictest reason rule, so a reason too short stops before anything changes.
+  const targets = (await trainingDays(b))
+    .filter((d) => ACTIVE.includes(d.status) && !d.finished_at && (d.date >= today || d.status !== "confirmed"))
+    .sort((x, y) => x.date.localeCompare(y.date));
+  if (!targets.length) return { error: "No day of this training can be cancelled." };
+  let done = 0;
+  for (const d of targets) {
+    const one = new FormData();
+    one.set("id", d.id);
+    one.set("reason", String(fd.get("reason") ?? ""));
+    const r = await cancelBooking(one);
+    if (r.error) {
+      refreshTraining();
+      return { error: done ? `${done} of ${targets.length} days were cancelled. ${r.error}` : r.error };
+    }
+    done += 1;
+  }
+  refreshTraining();
+  return { ok: "Training cancelled. The trainer was notified and the reason is in the activity log." };
+}
+
 /* ---------- Trainer brief after the training ---------- */
 
 async function ownConfirmedPast(bookingId: string) {
@@ -641,31 +736,61 @@ export async function recordBriefFile(bookingId: string, path: string, fileName:
   return { ok: `Attached ${fileName}.` };
 }
 
+export async function createAudioUpload(bookingId: string, fileName: string) {
+  const r = await ownConfirmedPast(bookingId);
+  if ("error" in r) return { error: r.error };
+  const bad = checkAudioFile(fileName);
+  if (bad) return { error: bad };
+  const path = `${bookingId}/audio-${Date.now()}-${safeName(fileName)}`;
+  const { data, error } = await db().storage.from("materials").createSignedUploadUrl(path);
+  if (error) return { error: error.message };
+  return { path, token: data.token };
+}
+
+export async function recordAudioFile(bookingId: string, path: string, fileName: string, size: number) {
+  const r = await ownConfirmedPast(bookingId);
+  if ("error" in r) return { error: r.error };
+  if (!path.startsWith(`${bookingId}/audio-`) || path.includes("..") || !isAudioPath(path) || checkAudioFile(path)) return { error: "Invalid upload." };
+  const { error } = await db().from("booking_materials").insert({ booking_id: bookingId, file_path: path, file_name: fileName.slice(0, 200), size_bytes: Number.isFinite(size) ? size : null, uploaded_by: r.me.id, kind: "brief" });
+  if (error) return { error: friendlyError(error.message) };
+  await audit(r.me.id, "audio_uploaded", bookingId, { program: title(r.b) });
+  revalidatePath(`/me/bookings/${bookingId}`);
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath("/dashboard", "layout");
+  return { ok: `Added ${fileName}.` };
+}
+
 export async function submitBrief(bookingId: string, text: string) {
   const r = await ownConfirmedPast(bookingId);
   if ("error" in r) return { error: r.error };
   const brief = text.replace(/\r\n/g, "\n").trim();
-  const { count } = await db().from("booking_materials").select("id", { count: "exact", head: true }).eq("booking_id", bookingId).eq("kind", "brief");
-  if (!brief && !count) return { error: "The brief is required: write it or attach a document before marking the training as finished." };
+  const { data: attached } = await db().from("booking_materials").select("file_path").eq("booking_id", bookingId).eq("kind", "brief");
+  const paths = ((attached ?? []) as { file_path: string }[]).map((m) => m.file_path);
+  const audioCount = paths.filter(isAudioPath).length;
+  const count = paths.length - audioCount;
+  if (!brief && !count) return { error: "The brief is required: write it or attach a document before marking the training as delivered." };
   const first = !r.b.finished_at;
+  // Days delivered before audio was required can still update their brief without it.
+  if (first && !audioCount) return { error: "The training audio is required: add it before marking the training as delivered." };
   const now = new Date().toISOString();
-  // Submitting the brief is what marks the training day as finished.
+  // Submitting the brief and audio is what marks the training day as delivered (finished_at).
   const { error } = await db().from("bookings").update({ brief: brief || null, brief_submitted_at: now, finished_at: r.b.finished_at ?? now }).eq("id", bookingId);
   if (error) return { error: friendlyError(error.message) };
   await audit(r.me.id, "brief_submitted", bookingId, { program: title(r.b) });
   await notify(await usersWithRoles("admin", "approver"), {
-    title: `${first ? "Training finished" : "Brief updated"}: ${title(r.b)}`,
+    title: `${first ? "Training delivered" : "Brief updated"}: ${title(r.b)}`,
     body: `${r.me.full_name}${brief ? `: ${brief.slice(0, 140)}${brief.length > 140 ? "…" : ""}` : " attached a document."}`,
-    link: `/bookings/${bookingId}`,
+    link: `/dashboard/${bookingId}`,
     email: {
-      subject: `${first ? "Training finished" : "Brief updated"}: ${title(r.b)}`,
-      intro: `<b>${esc(r.me.full_name)}</b> ${first ? "marked this training as finished and submitted the brief" : "updated the brief"}.`,
-      rows: [...bookingRows(r.b), ...(count ? [["Attachments", `${count} document${count > 1 ? "s" : ""}`] as [string, string]] : [])],
+      subject: `${first ? "Training delivered" : "Brief updated"}: ${title(r.b)}`,
+      intro: `<b>${esc(r.me.full_name)}</b> ${first ? "marked this training as delivered and added the brief and audio" : "updated the brief"}.`,
+      rows: [...bookingRows(r.b), ...(count ? [["Attachments", `${count} document${count > 1 ? "s" : ""}`] as [string, string]] : []), ...(audioCount ? [["Audio", `${audioCount} file${audioCount > 1 ? "s" : ""}`] as [string, string]] : [])],
       content: brief || undefined,
       button: "Read the brief",
     },
   });
   revalidatePath(`/me/bookings/${bookingId}`);
   revalidatePath(`/bookings/${bookingId}`);
-  return { ok: first ? "Training marked as finished. Thank you, your brief was sent to the team." : "Brief updated and the team was notified." };
+  revalidatePath("/dashboard", "layout");
+  return { ok: first ? "Training marked as delivered. Thank you, your brief and audio were sent to the team." : "Brief updated and the team was notified." };
 }

@@ -3,8 +3,9 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
-import { createBriefUpload, createMaterialUpload, materialLink, proposalLink, recordBriefFile, recordMaterial, respondBooking, submitBrief } from "@/app/(app)/bookings/actions";
+import { createAudioUpload, createBriefUpload, createMaterialUpload, materialLink, proposalLink, recordAudioFile, recordBriefFile, recordMaterial, respondBooking, submitBrief } from "@/app/(app)/bookings/actions";
 import { contentLink } from "@/app/(app)/content/actions";
+import { AUDIO_MAX_BYTES, checkAudioFile } from "@/lib/files";
 
 const OFFLINE = { error: "That didn't go through. Check your connection and try again." };
 
@@ -117,9 +118,10 @@ export function DownloadButton({ id, name, kind = "material" }: { id: string; na
   );
 }
 
-export function BriefBox({ bookingId, initial, submittedAt, finished }: { bookingId: string; initial: string; submittedAt: string | null; finished: boolean }) {
+export function BriefBox({ bookingId, initial, submittedAt, finished, hasAudio }: { bookingId: string; initial: string; submittedAt: string | null; finished: boolean; hasAudio: boolean }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
+  const audioInput = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(initial);
   const [m, setM] = useState<{ error?: string; ok?: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -153,10 +155,38 @@ export function BriefBox({ bookingId, initial, submittedAt, finished }: { bookin
     if (input.current) input.current.value = "";
     router.refresh();
   }
+  async function attachAudio(file: File | undefined) {
+    if (!file) return;
+    const bad = checkAudioFile(file.name) ?? (file.size > AUDIO_MAX_BYTES ? "The audio must be under 100 MB. Compress it or split it into parts." : null);
+    if (bad) {
+      setM({ error: bad });
+      if (audioInput.current) audioInput.current.value = "";
+      return;
+    }
+    setBusy(true);
+    setM(null);
+    const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!);
+    try {
+      const u = await createAudioUpload(bookingId, file.name);
+      if ("error" in u && u.error) {
+        setM({ error: u.error });
+      } else {
+        const { path, token } = u as { path: string; token: string };
+        const { error } = await sb.storage.from("materials").uploadToSignedUrl(path, token, file);
+        setM(error ? { error: `${file.name}: ${error.message}` } : await recordAudioFile(bookingId, path, file.name, file.size));
+      }
+    } catch {
+      setM(OFFLINE);
+    }
+    setBusy(false);
+    if (audioInput.current) audioInput.current.value = "";
+    router.refresh();
+  }
   return (
     <div className="space-y-2">
+      <p className="text-sm text-muted">To mark this day as delivered, add the audio of the training and the brief.</p>
       <label className="label" htmlFor="brief">
-        Brief (required to finish): how did the training go? Key points, attendance, client reactions, follow-ups.
+        Brief (required): how did the training go? Key points, attendance, client reactions, follow-ups.
       </label>
       <textarea id="brief" className="input" rows={5} value={text} onChange={(e) => setText(e.target.value)} />
       <div className="flex flex-wrap items-center gap-2">
@@ -171,8 +201,12 @@ export function BriefBox({ bookingId, initial, submittedAt, finished }: { bookin
             })
           }
         >
-          {pending ? "Sending…" : finished ? "Update brief" : "✓ Mark training as finished"}
+          {pending ? "Sending…" : finished ? "Update brief" : "✓ Mark as delivered"}
         </button>
+        <label className="btn-ghost cursor-pointer">
+          {busy ? "Uploading…" : hasAudio ? "+ Add more audio" : "+ Add training audio (required)"}
+          <input ref={audioInput} type="file" accept=".mp3,.m4a,.wav,audio/*" className="hidden" disabled={busy} onChange={(e) => attachAudio(e.target.files?.[0])} />
+        </label>
         <label className="btn-ghost cursor-pointer">
           {busy ? "Uploading…" : "+ Attach document"}
           <input ref={input} type="file" multiple className="hidden" disabled={busy} onChange={(e) => attach(e.target.files)} />

@@ -8,8 +8,9 @@ import { googleCalendarUrl } from "@/lib/ics";
 import { siteUrl } from "@/lib/email";
 import type { BookingRow } from "@/lib/notify";
 import { getDealInfo } from "@/lib/deal-info";
+import { isAudioPath } from "@/lib/files";
 
-type Material = { id: string; file_name: string; size_bytes: number | null; created_at: string; kind: string };
+type Material = { id: string; file_name: string; file_path: string; size_bytes: number | null; created_at: string; kind: string };
 
 // trainerView: the assigned trainer is looking — they may write the brief.
 export async function Ticket({ b, canUpload, trainerView = false }: { b: BookingRow; canUpload: boolean; trainerView?: boolean }) {
@@ -73,7 +74,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
           </h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          {b.finished_at && <span className="badge bg-good-bg text-good">Finished</span>}
+          {b.finished_at && <span className="badge bg-good-bg text-good">Delivered</span>}
           <StatusBadge status={b.status} />
         </div>
       </div>
@@ -165,11 +166,11 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
       {(trainerView ? briefOpen : b.status === "confirmed") && (
         <div className="rounded-2xl border border-ice2 bg-ice p-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="h2">{trainerView && !b.finished_at ? "Finish this training" : "Trainer brief"}</h2>
+            <h2 className="h2">{trainerView && !b.finished_at ? "Mark this training as delivered" : "Brief and audio"}</h2>
             {b.brief_submitted_at && <span className="badge bg-good-bg text-good">Submitted {fmtDateTime(b.brief_submitted_at)}</span>}
           </div>
           {trainerView ? (
-            <BriefBox bookingId={b.id} initial={b.brief ?? ""} submittedAt={b.brief_submitted_at} finished={!!b.finished_at} />
+            <BriefBox bookingId={b.id} initial={b.brief ?? ""} submittedAt={b.brief_submitted_at} finished={!!b.finished_at} hasAudio={briefFiles.some((m) => isAudioPath(m.file_path))} />
           ) : b.brief || briefFiles.length ? (
             b.brief && <p className="whitespace-pre-wrap text-sm leading-relaxed">{b.brief}</p>
           ) : (
@@ -180,7 +181,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
               {briefFiles.map((m) => (
                 <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface px-3 py-2">
                   <DownloadButton id={m.id} name={m.file_name} />
-                  <span className="text-xs text-muted">{fmtDateTime(m.created_at)}</span>
+                  <span className="text-xs text-muted">{isAudioPath(m.file_path) ? "Audio · " : ""}{fmtDateTime(m.created_at)}</span>
                 </li>
               ))}
             </ul>

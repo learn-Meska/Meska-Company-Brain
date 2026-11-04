@@ -93,7 +93,9 @@ export const AUDIT_LABEL: Record<string, string> = {
   team_member_removed: "Team member removed",
   feedback_imported: "Feedback imported",
   availability_submitted: "Availability submitted",
-  brief_submitted: "Training finished / brief submitted",
+  brief_submitted: "Training delivered / brief submitted",
+  audio_uploaded: "Training audio added",
+  trainer_removed: "Trainer removed to reassign",
 };
 
 // Training start in Cairo time.

@@ -9,6 +9,14 @@ export function checkFile(fileName: string) {
   return null;
 }
 
+// The training audio a trainer adds when marking a day as delivered. It is stored as a "brief" material
+// (the table only allows material and brief) and told apart by the audio- prefix of its stored name.
+export const AUDIO_MAX_BYTES = 100 * 1024 * 1024; // the size limit of the materials bucket
+export const isAudioPath = (path: string) => /\/audio-[^/]+$/.test(path);
+export function checkAudioFile(fileName: string) {
+  return typeof fileName === "string" && /\.(mp3|m4a|wav)$/i.test(fileName.trim()) ? null : "The audio must be an MP3, M4A or WAV file.";
+}
+
 // The name a browser saves a download under: the saved name if it is plain and allowed, else the stored object's own name.
 // Keeps non-Latin names (e.g. Arabic) and drops only characters that are unsafe in a file name.
 export function downloadName(fileName: string, path: string) {
