@@ -97,7 +97,7 @@ export async function requireTrainer(): Promise<CurrentUser & { trainer_id: stri
   return u as CurrentUser & { trainer_id: string };
 }
 
-export const ROLE_LABEL: Record<Role, string> = { admin: "Admin", approver: "Booking manager", growth: "Growth", content: "Content", trainer: "Trainer" };
+export const ROLE_LABEL: Record<Role, string> = { admin: "Admin", approver: "Training Excellence", growth: "Growth", content: "Content", trainer: "Trainer" };
 
 export const canManageTrainers = (u: CurrentUser) => u.role === "admin" || u.can_manage_trainers;
 // Scoring & lists (skills, filter lists, score categories, tiers, rules): admins and booking managers.

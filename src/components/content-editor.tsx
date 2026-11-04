@@ -117,7 +117,7 @@ export function ContentEditor({ dealId, initialGuide, submittedAt, files }: { de
         <button type="button" className="btn" disabled={pending || busy} onClick={submit}>
           {pending ? "Saving…" : submittedAt ? "Send update to the trainer" : "Submit to the trainer"}
         </button>
-        <span className="text-xs text-muted">Saves the guide and notifies the assigned trainer and the booking team.</span>
+        <span className="text-xs text-muted">Saves the guide and notifies the assigned trainer and Training Excellence.</span>
       </div>
       <Note m={m} />
     </section>

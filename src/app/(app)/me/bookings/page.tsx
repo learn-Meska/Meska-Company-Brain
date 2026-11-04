@@ -32,7 +32,7 @@ export default async function MyBookingsPage({ searchParams }: PageProps<"/me/bo
   return (
     <div className="space-y-5">
       <PageHeader kicker="My trainings" title={<>Booked days</>} />
-      {declined && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Your response was sent. The booking team will assign another trainer.</p>}
+      {declined && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Your response was sent. Training Excellence will assign another trainer.</p>}
       <div className="space-y-2">{upcoming.length ? upcoming.map((b) => <Item key={b.id} b={b} />) : <p className="card text-muted">No upcoming trainings.</p>}</div>
       {other.length > 0 && (
         <>

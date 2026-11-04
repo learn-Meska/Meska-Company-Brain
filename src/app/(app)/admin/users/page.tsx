@@ -7,7 +7,7 @@ import { addTeamMember, removeTeamMember, resendTeamInvite, updateTeamMember } f
 type U = { id: string; email: string; full_name: string; role: string; roles: string[] | null; can_manage_trainers: boolean };
 
 const ROLE_OPTIONS = [
-  ["approver", "Booking manager"],
+  ["approver", "Training Excellence"],
   ["growth", "Growth"],
   ["content", "Content"],
   ["admin", "Admin"],
@@ -32,7 +32,7 @@ export default async function UsersPage() {
   const users = ((data ?? []) as U[]).filter((u) => (u.roles ?? []).length > 0);
   return (
     <div className="space-y-6">
-      <PageHeader kicker="Access" title={<>Team &amp; access</>} lead={<>Booking managers (e.g. Amr Fahmy, Mahmoud) and admins book trainers; Growth finds trainers and downloads their profiles; Content prepares the guide and files for each deal. Tick more than one role to give the same email several kinds of access; they switch between them from the menu. Trainers are invited from their profile page — a team member can be a trainer too.</>} />
+      <PageHeader kicker="Access" title={<>Team &amp; access</>} lead={<>Training Excellence (e.g. Amr Fahmy, Mahmoud) and admins book trainers; Growth finds trainers and downloads their profiles; Content prepares the guide and files for each deal. Tick more than one role to give the same email several kinds of access; they switch between them from the menu. Trainers are invited from their profile page — a team member can be a trainer too.</>} />
 
       <section className="card">
         <h2 className="h2 mb-3">Add a team member</h2>

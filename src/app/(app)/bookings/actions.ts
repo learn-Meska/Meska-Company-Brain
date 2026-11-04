@@ -113,7 +113,7 @@ export async function createRequest(input: NewRequest) {
   // A picked trainer must still be free and matching when the request is sent.
   for (const d of input.days) {
     if (d.trainer_id && !(await freeTrainers(d)).some((t) => t.id === d.trainer_id))
-      return { error: `Day ${d.day_number}: that trainer is no longer available. Pick another or leave it to the booking team.` };
+      return { error: `Day ${d.day_number}: that trainer is no longer available. Pick another or leave it to Training Excellence.` };
   }
   // The proposal must really be in storage (the browser uploads it before sending the request).
   const { error: missingFile } = await db().storage.from("proposals").createSignedUrl(input.proposal.path, 60);
@@ -231,7 +231,7 @@ export async function createRequest(input: NewRequest) {
     },
   });
   refresh();
-  return { ok: "Request sent. It's on the calendar and the booking team was notified.", ids: rows.map((b) => b.id) };
+  return { ok: "Request sent. It's on the calendar and Training Excellence was notified.", ids: rows.map((b) => b.id) };
 }
 
 /* ---------- Assign a trainer to a request ---------- */
@@ -458,7 +458,7 @@ export async function editBooking(fd: FormData) {
   await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), { title: `Training updated: ${title(fresh)}`, body: summary, link: `/bookings/${id}`, email });
   refresh();
   revalidatePath(`/bookings/${id}`);
-  return { ok: fresh.trainer_id ? "Saved. The trainer, admins and booking managers were notified of the changes." : "Saved. Admins and booking managers were notified of the changes." };
+  return { ok: fresh.trainer_id ? "Saved. The trainer, admins and Training Excellence were notified of the changes." : "Saved. Admins and Training Excellence were notified of the changes." };
 }
 
 /* ---------- Client contact (whole request) ---------- */

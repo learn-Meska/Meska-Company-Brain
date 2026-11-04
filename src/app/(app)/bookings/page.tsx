@@ -17,7 +17,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
   const link = (p: Record<string, string>) => "/bookings?" + new URLSearchParams({ ...(typeof status === "string" ? { status } : {}), ...(typeof when === "string" ? { when } : {}), ...p }).toString();
   return (
     <div className="space-y-5">
-      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Request sent. It&apos;s on the calendar as “Needs a trainer” and the booking team was notified.</p>}
+      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Request sent. It&apos;s on the calendar as “Needs a trainer” and Training Excellence was notified.</p>}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <PageHeader kicker="Bookings" title={<>All bookings</>} />
       <div className="flex flex-wrap gap-2">

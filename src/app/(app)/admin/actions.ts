@@ -207,7 +207,7 @@ async function sendTrainerAccess(email: string, name: string) {
 }
 
 const STAFF_ROLES = ["admin", "approver", "growth", "content"] as const;
-const ROLE_TEXT: Record<string, string> = { admin: "Admin", approver: "Booking manager", growth: "Growth", content: "Content" };
+const ROLE_TEXT: Record<string, string> = { admin: "Admin", approver: "Training Excellence", growth: "Growth", content: "Content" };
 const pickRoles = (fd: FormData) => STAFF_ROLES.filter((r) => fd.getAll("roles").map(String).includes(r));
 const rolesText = (roles: string[]) => roles.map((r) => ROLE_TEXT[r] ?? r).join(" + ");
 // Trainer management only takes effect in a booking-manager view (Growth views ignore it), so only store it there.

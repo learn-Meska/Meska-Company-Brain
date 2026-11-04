@@ -30,7 +30,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   return (
     <div className="space-y-5">
       <Link href="/bookings" className="text-sm text-blue hover:underline">← All bookings</Link>
-      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and the booking team was notified." : "Request sent. It's on the calendar as “Needs a trainer” and the booking team was notified."}</p>}
+      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and Training Excellence was notified." : "Request sent. It's on the calendar as “Needs a trainer” and Training Excellence was notified."}</p>}
       {b.status === "needs_trainer" && canBook(me) && (
         <section className="card border-2 border-[#F4A9C4]">
           <div className="eyebrow">Needs a trainer</div>
@@ -61,7 +61,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
         <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
           <section className="card">
             <h2 className="h2 mb-1">Edit training</h2>
-            <p className="mb-3 text-xs text-muted">The trainer, admins and booking managers are notified of what changed. To change the trainer, cancel and book again.</p>
+            <p className="mb-3 text-xs text-muted">The trainer, admins and Training Excellence are notified of what changed. To change the trainer, cancel and book again.</p>
             <Form action={editBooking} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="id" value={b.id} />
               <div className="sm:col-span-2 grid grid-cols-[1fr_90px] gap-3">

@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { setViewAs } from "@/app/auth/actions";
 
-const LABEL: Record<string, string> = { admin: "Admin", approver: "Booking manager", growth: "Growth", content: "Content", trainer: "Trainer" };
+const LABEL: Record<string, string> = { admin: "Admin", approver: "Training Excellence", growth: "Growth", content: "Content", trainer: "Trainer" };
 
 export function ViewSwitcher({ current, views, label = "View as", id = "view_as" }: { current: string; views: string[]; label?: string; id?: string }) {
   const form = useRef<HTMLFormElement>(null);

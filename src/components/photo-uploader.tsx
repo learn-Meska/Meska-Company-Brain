@@ -66,7 +66,7 @@ export function CvUploader({ trainerId, cvName }: { trainerId: string; cvName: s
             <input ref={input} type="file" accept=".pdf,.doc,.docx" className="hidden" disabled={busy} onChange={(e) => upload(e.target.files?.[0])} />
           </label>
         </div>
-        <p className="mt-1 text-xs text-muted">PDF or Word, up to 10 MB. Visible to admins, booking managers, Growth and the trainer.</p>
+        <p className="mt-1 text-xs text-muted">PDF or Word, up to 10 MB. Visible to admins, Training Excellence, Growth and the trainer.</p>
         {msg?.error && <p className="mt-1 text-xs text-bad">{msg.error}</p>}
         {msg?.ok && <p className="mt-1 text-xs text-good">{msg.ok}</p>}
       </div>

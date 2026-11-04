@@ -301,7 +301,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                 ) : !opts ? (
                   <p className="text-xs text-muted">{options.query === query && options.error ? options.error : "Finding available trainers…"}</p>
                 ) : opts[i].length === 0 ? (
-                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No matching trainer is free at this time. Try another date or time{trainerRequired ? ", or contact the booking team" : ""}.</p>
+                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No matching trainer is free at this time. Try another date or time{trainerRequired ? ", or contact Training Excellence" : ""}.</p>
                 ) : (
                   <select
                     id={`t${d.key}`}
@@ -310,7 +310,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                     disabled={!!sameId}
                     onChange={(e) => patch(d.key, { trainerId: e.target.value })}
                   >
-                    <option value="">{trainerRequired ? "Choose a trainer…" : "Leave to the booking team"}</option>
+                    <option value="">{trainerRequired ? "Choose a trainer…" : "Leave to Training Excellence"}</option>
                     {opts[i].map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.full_name}
@@ -362,7 +362,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           {pending ? "Sending…" : days.length > 1 ? `Send deal · ${days.length} days` : "Send deal"}
         </button>
         <span className="text-xs text-muted">
-          {trainerRequired ? "The trainer is emailed to confirm and the booking team is notified." : "Days with a trainer are emailed to the trainer; the rest go on the calendar as “Needs a trainer”."}
+          {trainerRequired ? "The trainer is emailed to confirm and Training Excellence is notified." : "Days with a trainer are emailed to the trainer; the rest go on the calendar as “Needs a trainer”."}
         </span>
       </div>
     </div>
