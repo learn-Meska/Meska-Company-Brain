@@ -119,7 +119,7 @@ export function homeFor(u: CurrentUser) {
     case "trainer":
       return "/me";
     case "approver":
-      return "/calendar";
+      return "/dashboard";
     case "growth":
       return "/request";
     case "content":

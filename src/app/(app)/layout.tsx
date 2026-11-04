@@ -10,6 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (u.role === "content") {
     items.push({ href: "/content", label: "Content requests" });
   } else if (u.role !== "trainer") {
+    if (canBook(u)) items.push({ href: "/dashboard", label: "Dashboard" });
     items.push({ href: "/request", label: u.role === "growth" ? "New deal" : "Request a training" });
     if (canBook(u)) items.push({ href: "/find", label: "Find a trainer" });
     items.push({ href: "/calendar", label: "Calendar" }, { href: "/bookings", label: "All bookings" }, { href: "/trainers", label: "Trainers" });
