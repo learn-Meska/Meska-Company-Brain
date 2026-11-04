@@ -1,7 +1,7 @@
 // Rules for the Training Excellence dashboard: how days become trainings, and where each training stands.
 
 import { describe, expect, it } from "vitest";
-import { buildTrainings, contentState, cycleStage, isDeclined, matchesWhen, needsAttention, type CycleDay, type CycleDeal } from "@/lib/cycle";
+import { buildTrainings, contentState, cycleStage, cycleSteps, isDeclined, matchesWhen, needsAttention, type CycleDay, type CycleDeal } from "@/lib/cycle";
 
 const TODAY = "2026-11-10";
 const LATER = "2026-12-01";
@@ -200,5 +200,50 @@ describe("order and the Active / Past filter", () => {
       expect(matchesWhen({ stage }, "past")).toBe(false);
       expect(matchesWhen({ stage }, "all")).toBe(true);
     }
+  });
+});
+
+describe("the steps on a row", () => {
+  const stepsOf = (days: CycleDay[], over: Partial<Parameters<typeof buildTrainings>[0]> = {}) =>
+    Object.fromEntries(cycleSteps(build(days, over)[0], TODAY).map((s) => [s.key, s]));
+
+  it("always in cycle order", () => {
+    expect(cycleSteps(build([day()])[0], TODAY).map((s) => s.key)).toEqual(["requested", "content", "trainer", "delivery", "feedback"]);
+  });
+  it("a fully booked future training", () => {
+    const s = stepsOf([day({ deal_id: "d1" })], { deals: [deal()] });
+    expect(s.requested).toMatchObject({ state: "done", title: "Sara", detail: "2 Oct" });
+    expect(s.content).toMatchObject({ state: "done", title: "Submitted", detail: "5 Oct" });
+    expect(s.trainer).toMatchObject({ state: "done", title: "Confirmed", detail: "Amr" });
+    expect(s.delivery).toMatchObject({ state: "upcoming", title: "1 Dec", detail: "In 21 days" });
+    expect(s.feedback).toMatchObject({ state: "upcoming", title: "Not yet" });
+  });
+  it("content: no deal, not started and draft", () => {
+    expect(stepsOf([day()]).content).toMatchObject({ state: "none", title: "—" });
+    expect(stepsOf([day({ deal_id: "d1" })], { deals: [deal({ content_submitted_at: null })] }).content).toMatchObject({ state: "waiting", title: "Needs content" });
+    expect(stepsOf([day({ deal_id: "d1" })], { deals: [deal({ content_submitted_at: null, content_guide: "Draft" })] }).content).toMatchObject({ state: "active", title: "In progress" });
+  });
+  it("trainer: open, declined and waiting", () => {
+    expect(stepsOf([day({ status: "needs_trainer", trainer_id: null })]).trainer).toMatchObject({ state: "blocked", title: "Needs a trainer", detail: "1 of 1 day open" });
+    expect(stepsOf([day({ status: "needs_trainer", trainer_id: null, trainer_responded_at: "2026-11-02T10:00:00Z" })]).trainer).toMatchObject({ state: "blocked", title: "Trainer declined" });
+    expect(stepsOf([day({ batch_id: "x" }), day({ batch_id: "x", day_number: 2, status: "awaiting_trainer" })]).trainer).toMatchObject({ state: "waiting", detail: "1 of 2 confirmed" });
+  });
+  it("delivery: running, delivered, and a date that passed unconfirmed", () => {
+    expect(stepsOf([day({ date: TODAY })]).delivery).toMatchObject({ state: "active", detail: "Running today" });
+    expect(stepsOf([day({ batch_id: "x", date: PAST }), day({ batch_id: "x", day_number: 2 })]).delivery).toMatchObject({ state: "active", detail: "Next 1 Dec" });
+    expect(stepsOf([day({ date: PAST, finished_at: "2026-11-01T18:00:00Z" })]).delivery).toMatchObject({ state: "done", title: "Delivered", detail: "1 of 1 day finished" });
+    expect(stepsOf([day({ date: PAST, status: "needs_trainer", trainer_id: null })]).delivery).toMatchObject({ state: "blocked", title: "Date passed" });
+    expect(stepsOf([day({ date: "2026-11-11" })]).delivery.detail).toBe("Starts tomorrow");
+  });
+  it("feedback counts responses once it started", () => {
+    const d = day({ date: PAST });
+    expect(stepsOf([d], { feedbackBookingIds: [d.id, d.id] }).feedback).toMatchObject({ state: "done", title: "2 responses" });
+    expect(stepsOf([day({ date: PAST })]).feedback.title).toBe("No responses");
+    expect(stepsOf([day({ date: PAST, status: "needs_trainer", trainer_id: null })]).feedback).toMatchObject({ state: "none", title: "—" });
+  });
+  it("a cancelled training shows nothing in progress", () => {
+    const steps = cycleSteps(build([day({ status: "cancelled" })])[0], TODAY);
+    expect(steps.slice(1).every((s) => s.state === "none")).toBe(true);
+    expect(steps[2].title).toBe("Cancelled");
   });
 });

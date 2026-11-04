@@ -1,7 +1,7 @@
 // The training cycle on the Training Excellence dashboard: one row per training, worked out from its days.
 // No database here and `today` is an argument, so every rule can be tested with plain data.
 
-import { ACTIVE_STATUSES } from "@/lib/format";
+import { ACTIVE_STATUSES, fmtDate } from "@/lib/format";
 
 export type CycleDay = {
   id: string;
@@ -164,4 +164,47 @@ const isClosed = (t: Pick<Training, "stage">) => t.stage === "delivered" || t.st
 
 export function matchesWhen(t: Pick<Training, "stage">, when: When) {
   return when === "all" || (when === "past") === isClosed(t);
+}
+
+export type StepState = "done" | "active" | "waiting" | "blocked" | "upcoming" | "none";
+export type Step = { key: string; label: string; state: StepState; title: string; detail?: string };
+
+const shortDay = (d: string, today: string) => fmtDate(d, { day: "numeric", month: "short", ...(d.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }) });
+const shortStamp = (ts: string, today: string) =>
+  new Date(ts).toLocaleDateString("en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", ...(ts.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }) });
+const daysUntil = (d: string, today: string) => Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+// One dashboard row: where a training stands at each step of the cycle, in plain words.
+export function cycleSteps(t: Training, today: string): Step[] {
+  const requested: Step = { key: "requested", label: "Requested", state: "done", title: t.requestedByName ?? "Unknown", detail: shortStamp(t.requestedAt, today) };
+  const none = (key: string, label: string, title = "—", detail?: string): Step => ({ key, label, state: "none", title, detail });
+  if (!t.live) return [requested, none("content", "Content"), none("trainer", "Trainer", "Cancelled", plural(t.days.length, "day")), none("delivery", "Delivery"), none("feedback", "Feedback")];
+
+  const live = t.days.filter(isLive);
+  const open = live.filter(hasNoTrainer).length;
+
+  const content: Step =
+    t.content === "submitted" ? { key: "content", label: "Content", state: "done", title: "Submitted", detail: t.contentSubmittedAt ? shortStamp(t.contentSubmittedAt, today) : undefined }
+    : t.content === "in_progress" ? { key: "content", label: "Content", state: "active", title: "In progress", detail: "Not submitted yet" }
+    : t.content === "needs_content" ? { key: "content", label: "Content", state: "waiting", title: "Needs content", detail: "Not started" }
+    : none("content", "Content");
+
+  const trainer: Step =
+    open ? { key: "trainer", label: "Trainer", state: "blocked", title: live.some(isDeclined) ? "Trainer declined" : "Needs a trainer", detail: `${open} of ${plural(t.live, "day")} open` }
+    : t.confirmed === t.live ? { key: "trainer", label: "Trainer", state: "done", title: "Confirmed", detail: t.trainers.map((x) => x.name).join(", ") }
+    : { key: "trainer", label: "Trainer", state: "waiting", title: "Waiting to confirm", detail: `${t.confirmed} of ${t.live} confirmed` };
+
+  const delivery: Step =
+    !t.nextDate ? (t.confirmed === t.live ? { key: "delivery", label: "Delivery", state: "done", title: "Delivered", detail: `${t.finished} of ${plural(t.live, "day")} finished` } : { key: "delivery", label: "Delivery", state: "blocked", title: "Date passed", detail: shortDay(t.lastDate, today) })
+    : t.started ? { key: "delivery", label: "Delivery", state: "active", title: "In delivery", detail: t.nextDate === today ? "Running today" : `Next ${shortDay(t.nextDate, today)}` }
+    : { key: "delivery", label: "Delivery", state: "upcoming", title: shortDay(t.nextDate, today), detail: daysUntil(t.nextDate, today) === 1 ? "Starts tomorrow" : `In ${daysUntil(t.nextDate, today)} days` };
+
+  // A day that passed without a confirmed trainer never ran, so no feedback is expected from it.
+  const feedback: Step =
+    t.feedback ? { key: "feedback", label: "Feedback", state: "done", title: plural(t.feedback, "response") }
+    : delivery.state === "blocked" ? none("feedback", "Feedback")
+    : { key: "feedback", label: "Feedback", state: "upcoming", title: t.started ? "No responses" : "Not yet" };
+
+  return [requested, content, trainer, delivery, feedback];
 }
