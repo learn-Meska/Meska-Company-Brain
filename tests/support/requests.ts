@@ -17,7 +17,7 @@ export function validRequest(over: Partial<NewRequest> = {}): NewRequest {
     ],
     proposal: { path: `${USER}/abc-proposal.pdf`, name: "Proposal.pdf", size: 1024 },
     value_per_day: 100000,
-    deal_days: 5,
+    deal_days: 1,
     same_trainer: false,
     days: [{ day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: "Cairo", trainer_id: TRAINER }],
     ...over,

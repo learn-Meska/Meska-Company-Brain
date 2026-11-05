@@ -162,6 +162,10 @@ export function dealValueError(valuePerDay: number, days: number) {
   return null;
 }
 
+// The days the proposal covers (step 3) must be the days actually added (step 4).
+export const dealDaysError = (dealDays: number, addedDays: number) =>
+  dealDays === addedDays ? null : "The number of days in the proposal doesn't match the number of days you added.";
+
 // value_per_day * days, rounded to the cent (e.g. 100,000 a day for 5 days = 500,000).
 export const dealTotal = (valuePerDay: number, days: number) => Math.round(valuePerDay * days * 100) / 100;
 
@@ -219,6 +223,8 @@ export function requestError(input: NewRequest, who: { role: string; userId: str
   // Step 4: training days
   if (!Array.isArray(input.days) || !input.days.length) return "Add at least one training day.";
   if (input.days.length > MAX_DEAL_DAYS) return "Too many training days.";
+  const de = dealDaysError(Number(input.deal_days), input.days.length);
+  if (de) return de;
   for (const d of input.days) {
     if (!Number.isInteger(d.day_number) || d.day_number < 1) return "Each day needs a day number of 1 or more.";
     const e = dayError(d);

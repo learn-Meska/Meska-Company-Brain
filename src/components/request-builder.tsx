@@ -267,6 +267,9 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           </div>
           <button type="button" onClick={addDay} className="btn-ghost">+ Add another day</button>
         </div>
+        {!valueError && dealDays && nDays !== days.length && (
+          <p className="text-xs text-muted">The proposal covers {nDays} {nDays === 1 ? "day" : "days"}; you have added {days.length}.</p>
+        )}
         {days.map((d, i) => (
           <div key={d.key} className="rounded-2xl border border-line p-4">
             <div className="mb-3 flex items-center justify-between">
