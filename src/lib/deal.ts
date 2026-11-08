@@ -163,8 +163,11 @@ export function dealValueError(valuePerDay: number, days: number) {
 }
 
 // The days the proposal covers (step 3) must be the days actually added (step 4).
+const daysText = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 export const dealDaysError = (dealDays: number, addedDays: number) =>
-  dealDays === addedDays ? null : "The number of days in the proposal doesn't match the number of days you added.";
+  dealDays === addedDays
+    ? null
+    : `The number of days chosen (${daysText(addedDays)}) does not match the proposal (${daysText(dealDays)}). ${addedDays < dealDays ? "Add" : "Remove"} ${daysText(Math.abs(dealDays - addedDays))} so they match.`;
 
 // value_per_day * days, rounded to the cent (e.g. 100,000 a day for 5 days = 500,000).
 export const dealTotal = (valuePerDay: number, days: number) => Math.round(valuePerDay * days * 100) / 100;

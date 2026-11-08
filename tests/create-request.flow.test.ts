@@ -130,7 +130,7 @@ describe("New deal: refusals leave nothing behind", () => {
 
   it("days that don't match the proposal are refused before any write", async () => {
     const r = await createRequest(await uploadedRequest({ deal_days: 3 }));
-    expect(r.error).toBe("The number of days in the proposal doesn't match the number of days you added.");
+    expect(r.error).toBe("The number of days chosen (1 day) does not match the proposal (3 days). Add 2 days so they match.");
     expect(h.fake.writes).toEqual([]);
   });
 

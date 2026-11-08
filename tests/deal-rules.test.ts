@@ -180,11 +180,14 @@ describe("requestError: the whole New deal, step by step", () => {
   });
   it("the days added must equal the days the proposal covers", () => {
     const day = validRequest().days[0];
-    const mismatch = "The number of days in the proposal doesn't match the number of days you added.";
     const three = [day, { ...day, day_number: 2 }, { ...day, day_number: 3 }];
     expect(requestError(validRequest({ deal_days: 3, days: three }), growth)).toBeNull();
-    expect(requestError(validRequest({ deal_days: 3, days: three.slice(0, 2) }), growth)).toBe(mismatch);
-    expect(requestError(validRequest({ deal_days: 2, days: three }), growth)).toBe(mismatch);
+    expect(requestError(validRequest({ deal_days: 3, days: three.slice(0, 1) }), growth)).toBe(
+      "The number of days chosen (1 day) does not match the proposal (3 days). Add 2 days so they match.",
+    );
+    expect(requestError(validRequest({ deal_days: 2, days: three }), growth)).toBe(
+      "The number of days chosen (3 days) does not match the proposal (2 days). Remove 1 day so they match.",
+    );
     // a bad day count in step 3 is reported as that, not as a mismatch
     expect(requestError(validRequest({ deal_days: 0, days: three }), growth)).toMatch(/how many days/);
   });
