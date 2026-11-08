@@ -86,6 +86,14 @@
     "title",
     "department"
   ],
+  "app_users": [
+    "id",
+    "email",
+    "full_name",
+    "role",
+    "roles",
+    "team_admin_of"
+  ],
   "buckets": [
     "proposals"
   ]

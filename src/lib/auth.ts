@@ -17,6 +17,8 @@ export type CurrentUser = {
   real_role: Role;
   // Every view this login can switch to: its staff roles, plus Trainer when it is linked to a trainer profile.
   views: Role[];
+  // The teams (staff roles) this login leads as a team admin; see src/lib/team-access.ts.
+  team_admin_of: string[];
 };
 
 const ROLE_ORDER: Role[] = ["admin", "approver", "growth", "content", "trainer"];
@@ -41,7 +43,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const { data: u } = await db().from("app_users").select("*").eq("id", uid).maybeSingle();
   if (!u) return null;
   const { data: t } = await db().from("trainers").select("id").eq("user_id", uid).maybeSingle();
-  const base = u as Omit<CurrentUser, "trainer_id" | "real_role" | "views"> & { roles: Role[] | null };
+  const base = u as Omit<CurrentUser, "trainer_id" | "real_role" | "views" | "team_admin_of"> & { roles: Role[] | null; team_admin_of: string[] | null };
   const trainerId = (t as { id: string } | null)?.id ?? null;
   // Removed from the team and not a trainer: no access, even while an old session is still valid.
   if (base.role === "trainer" && !(base.roles ?? []).length && !trainerId && (await removedMember(uid))) return null;
@@ -57,6 +59,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     can_manage_trainers: role === "growth" || role === "content" || role === "trainer" ? false : base.can_manage_trainers,
     real_role: base.role,
     trainer_id: trainerId,
+    team_admin_of: base.team_admin_of ?? [],
   };
 });
 

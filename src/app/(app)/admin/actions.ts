@@ -7,7 +7,8 @@ import { db } from "@/lib/supabase";
 import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
 import { isUuid } from "@/lib/format";
 import { hasUnprintable } from "@/lib/pdf-text";
-import { accessLink } from "@/lib/access-link";
+import { ensureAuthUser, rolesText, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
+import { cleanTeamAdmin } from "@/lib/team-access";
 import { audit } from "@/lib/notify";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -164,33 +165,6 @@ export async function saveRules(fd: FormData) {
 
 /* ---------- Team & access (admin only) ---------- */
 
-async function ensureAuthUser(email: string) {
-  const { data: existing } = await db().from("app_users").select("id").eq("email", email).maybeSingle();
-  if (existing) return { id: (existing as { id: string }).id, isNew: false };
-  const { data, error } = await db().auth.admin.createUser({ email, email_confirm: true });
-  if (error) {
-    // An auth user may already exist without an app profile (e.g. a removed member being re-added).
-    const { data: list } = await db().auth.admin.listUsers({ perPage: 1000 });
-    const found = list?.users.find((x) => x.email?.toLowerCase() === email);
-    if (found) return { id: found.id, isNew: false };
-    throw new Error(error.message);
-  }
-  return { id: data.user.id, isNew: true };
-}
-
-async function sendInvite(email: string, name: string, roleText: string) {
-  const link = await accessLink(email, "recovery");
-  await sendEmail(
-    email,
-    "You're invited to Meska Company Brain",
-    emailLayout({
-      greeting: `Dear ${name.split(" ")[0]},`,
-      intro: `You've been given access to Meska Company Brain as <b>${roleText}</b>. Use the button below to set your password and sign in. The link works once; if it expires, use “Forgot your password?” on the sign-in page.`,
-      button: { label: "Set my password", url: link },
-    }),
-  );
-}
-
 // For a login that already has a password (e.g. an admin who is also a trainer): no set-password
 // link, which would only ask them to replace the password they already use.
 async function sendTrainerAccess(email: string, name: string) {
@@ -206,10 +180,9 @@ async function sendTrainerAccess(email: string, name: string) {
   );
 }
 
-const STAFF_ROLES = ["admin", "approver", "growth", "content"] as const;
-const ROLE_TEXT: Record<string, string> = { admin: "Admin", approver: "Training Excellence", growth: "Growth", content: "Content" };
 const pickRoles = (fd: FormData) => STAFF_ROLES.filter((r) => fd.getAll("roles").map(String).includes(r));
-const rolesText = (roles: string[]) => roles.map((r) => ROLE_TEXT[r] ?? r).join(" + ");
+// The "Team admin" ticks, kept only for teams the person is in.
+const pickTeamAdmin = (fd: FormData, roles: string[]) => cleanTeamAdmin(roles, fd.getAll("team_admin").map(String));
 
 // One email can hold several roles (e.g. Booking manager + Growth); the highest becomes the main one.
 export async function addTeamMember(fd: FormData) {
@@ -232,9 +205,9 @@ export async function addTeamMember(fd: FormData) {
     const all = [...new Set([...held, ...roles])];
     const { error } = await db()
       .from("app_users")
-      .upsert({ id, email, full_name, role: mainRole(all), roles: all });
+      .upsert({ id, email, full_name, role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all) });
     if (error) return failed("addTeamMember", error);
-    await audit(me.id, "team_member_added", null, { email, roles });
+    await audit(me.id, "team_member_added", null, { email, roles, team_admin_of: pickTeamAdmin(fd, all) });
     await sendInvite(email, full_name, rolesText(roles));
   } catch (e) {
     console.error("[addTeamMember]", e instanceof Error ? e.message : e);
@@ -255,7 +228,7 @@ export async function updateTeamMember(fd: FormData) {
   // Keep the trainer role if they have one; only the staff roles are edited here.
   const keep = ((cur as { roles: string[] | null }).roles ?? []).filter((r) => !(STAFF_ROLES as readonly string[]).includes(r));
   const all = [...new Set([...roles, ...keep])];
-  const { error } = await db().from("app_users").update({ role: mainRole(all), roles: all }).eq("id", id);
+  const { error } = await db().from("app_users").update({ role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all) }).eq("id", id);
   if (error) return failed("updateTeamMember", error);
   return done("/admin/users", "Access saved.");
 }
@@ -273,7 +246,7 @@ export async function removeTeamMember(fd: FormData) {
   const { data: t } = await db().from("trainers").select("id").eq("user_id", id).maybeSingle();
   const { error } = await db()
     .from("app_users")
-    .update({ role: "trainer", roles: [], can_manage_trainers: false })
+    .update({ role: "trainer", roles: [], team_admin_of: [], can_manage_trainers: false })
     .eq("id", id);
   if (error) return failed("removeTeamMember", error);
   if (!t) {

@@ -3,6 +3,7 @@ import { Nav, type NavItem } from "@/components/nav";
 import { canBook, canEditSettings, requireUser, ROLE_LABEL } from "@/lib/auth";
 import { setViewAs, signOut } from "@/app/auth/actions";
 import { ViewSwitcher } from "@/components/view-switcher";
+import { ledTeam } from "@/lib/team-access";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const u = await requireUser();
@@ -21,6 +22,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
     else if (canEditSettings(u)) items.push({ href: "/admin/settings", label: "Scoring & lists" });
   }
+  // Team admins manage the people in the team they're working in.
+  if (ledTeam(u)) items.push({ href: "/team", label: "My team" });
   // Staff who also deliver trainings (e.g. the L&D director) get the trainer pages too.
   if (u.trainer_id && (u.role === u.real_role || u.role === "trainer")) {
     const p = u.role === "trainer" ? "My" : "My trainer";
