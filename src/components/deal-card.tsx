@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ProposalActions } from "@/components/booking-ui";
+import { FileBadge } from "@/components/file-badge";
 import { BuildingIcon, CalendarIcon, CoinsIcon, DownloadIcon, LayersIcon, TagIcon, UsersIcon } from "@/components/icons";
 import { db } from "@/lib/supabase";
 import { dealTotal, fmtAmount } from "@/lib/deal";
@@ -15,18 +16,6 @@ const initials = (name: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join("") || "?";
 
-// The proposal's file type as a small document tile (Word blue, PDF red, anything else neutral).
-function FileBadge({ name }: { name: string }) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  const [label, tone] =
-    ext === "pdf" ? ["PDF", "text-ds-danger"] : ext === "doc" || ext === "docx" ? ["DOC", "text-ds-primary"] : ext === "ppt" || ext === "pptx" ? ["PPT", "text-[#C2410C]"] : [ext.slice(0, 4).toUpperCase() || "FILE", "text-ds-text"];
-  return (
-    <span className="relative grid h-12 w-10 flex-none place-items-end rounded-md border border-ds-primary/15 bg-ds-primary-soft pb-1.5">
-      <span aria-hidden className="absolute right-0 top-0 h-3 w-3 rounded-bl-[4px] border-b border-l border-ds-primary/15 bg-ds-surface" />
-      <span className={`w-full text-center text-[10px] font-bold tracking-wide ${tone}`}>{label}</span>
-    </span>
-  );
-}
 
 function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
