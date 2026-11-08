@@ -11,7 +11,7 @@ type U = { id: string; email: string; full_name: string; roles: string[] | null;
 
 export default async function UsersPage({ searchParams }: PageProps<"/admin/users">) {
   const me = await requireRole("admin");
-  const { added, unsent, removed } = await searchParams;
+  const { added, unsent, removed, extended, category } = await searchParams;
   const [{ data }, active] = await Promise.all([db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").order("full_name"), activeLoginIds()]);
   // trainers without team access are managed from their profile, not here
   const users = ((data ?? []) as U[]).filter((u) => (u.roles ?? []).length > 0);
@@ -29,7 +29,8 @@ export default async function UsersPage({ searchParams }: PageProps<"/admin/user
         }
       />
       {typeof added === "string" && <Banner>User created. An invitation was emailed to <b>{added}</b>.</Banner>}
-      {typeof unsent === "string" && <Banner tone="warn">User created, but the email to <b>{unsent}</b> couldn&apos;t be sent. Open them and use “Resend invite”.</Banner>}
+      {typeof extended === "string" && <Banner><b>{extended}</b> now also has <b>{typeof category === "string" ? category : "the new category"}</b>. Their other access is unchanged.</Banner>}
+      {typeof unsent === "string" && <Banner tone="warn">{extended ? "Access saved" : "User created"}, but the email to <b>{unsent}</b> couldn&apos;t be sent. Open them and use “Resend invite”.</Banner>}
       {removed && <Banner>Access removed. They can no longer sign in to the team pages.</Banner>}
 
       <PeopleTable
