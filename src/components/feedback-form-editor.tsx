@@ -63,7 +63,7 @@ export function AlwaysOpenSwitch({ initial }: { initial: boolean }) {
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${on ? "bg-ds-primary-soft text-ds-primary" : "bg-ds-subtle text-ds-text"}`}>{on ? "On" : "Off"}</span>
         </div>
         <p className="text-sm text-ds-text">
-          {on ? "Participants can open the form at any time, for any training day that isn't cancelled." : "The form opens when the training day starts and closes 6 hours after it ends."}
+          {on ? "Participants can open the form at any time, once the trainer has confirmed the training day." : "The form opens when the training day starts and closes 6 hours after it ends."}
         </p>
         {m && <div className="mt-2"><Note m={m} /></div>}
       </div>

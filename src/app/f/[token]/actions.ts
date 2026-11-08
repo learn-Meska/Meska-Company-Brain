@@ -17,7 +17,7 @@ export async function submitParticipantFeedback(token: string, fd: FormData) {
   const { data } = await db().from("bookings").select("id, status, date, start_time, end_time, trainers(user_id)").eq("feedback_token", token).maybeSingle();
   const b = data as unknown as { id: string; status: string; date: string; start_time: string; end_time: string; trainers: { user_id: string | null } | null } | null;
   const alwaysOpen = await feedbackAlwaysOpen();
-  if (!b || !takesFeedback(b.status, alwaysOpen)) return { error: "This feedback link is not valid." };
+  if (!b || !takesFeedback(b.status)) return { error: "This feedback link is not valid." };
   // The trainer can't rate their own session.
   const me = await getCurrentUser();
   if (me && b.trainers?.user_id && me.id === b.trainers.user_id) return { error: "Trainers can't submit feedback for their own session." };

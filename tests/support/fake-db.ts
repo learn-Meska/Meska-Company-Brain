@@ -62,6 +62,10 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
       this.filters.push(["in", k, v]);
       return this;
     }
+    contains(k: string, v: unknown[]) {
+      this.filters.push(["contains", k, v]);
+      return this;
+    }
     order() {
       return this;
     }
@@ -77,7 +81,7 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
       return this;
     }
     private match(r: Row) {
-      return this.filters.every(([op, k, v]) => (op === "in" ? (v as unknown[]).includes(r[k]) : op === "is" ? (r[k] ?? null) === v : op === "neq" ? r[k] !== v : r[k] === v));
+      return this.filters.every(([op, k, v]) => (op === "in" ? (v as unknown[]).includes(r[k]) : op === "contains" ? (v as unknown[]).every((x) => ((r[k] as unknown[] | null) ?? []).includes(x)) : op === "is" ? (r[k] ?? null) === v : op === "neq" ? r[k] !== v : r[k] === v));
     }
     private exec(): Result {
       const t = this.table;

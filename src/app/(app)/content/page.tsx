@@ -18,16 +18,20 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
   const params = await searchParams;
   const state = isContentFilter(params.state) ? params.state : null;
   const soon = params.soon === "1";
+  const review = params.review === "1";
   const growth = isUuid(params.growth) ? params.growth : "";
   const trainer = isUuid(params.trainer) ? params.trainer : "";
 
-  const [days, deals, files, users] = await Promise.all([
+  const [days, deals, files, users, reviews] = await Promise.all([
     fetchAll<CycleDay>((from, to) => db().from("bookings").select("id, deal_id, batch_id, program_name, day_number, date, start_time, end_time, status, trainer_id, created_by, created_at, trainer_comment, trainer_responded_at, finished_at, brief_submitted_at, trainers(full_name), industry:lookups!bookings_industry_id_fkey(name)").not("deal_id", "is", null).order("id").range(from, to)),
     fetchAll<CycleDeal>((from, to) => db().from("deals").select("id, company_name, content_guide, content_submitted_at, created_at").order("id").range(from, to)),
     fetchAll<{ deal_id: string }>((from, to) => db().from("deal_content").select("deal_id").order("id").range(from, to)),
     fetchAll<{ id: string; full_name: string }>((from, to) => db().from("app_users").select("id, full_name").order("id").range(from, to)),
+    fetchAll<{ id: string; content_review_requested_at: string | null; content_review_note: string | null }>((from, to) =>
+      db().from("deals").select("id, content_review_requested_at, content_review_note").or("content_review_requested_at.not.is.null,content_review_note.not.is.null").order("id").range(from, to),
+    ),
   ]);
-  const failed = [days, deals, files, users].find((r) => r.error);
+  const failed = [days, deals, files, users, reviews].find((r) => r.error);
   if (failed) {
     console.error("[content]", failed.error);
     return (
@@ -40,6 +44,10 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
 
   const today = todayISO();
   const soonEnd = addDays(today, SOON_DAYS);
+  // a member's content waiting for a content admin, or sent back with a note
+  const awaiting = new Set(reviews.data.filter((r) => r.content_review_requested_at).map((r) => r.id));
+  const returned = new Set(reviews.data.filter((r) => !r.content_review_requested_at && r.content_review_note).map((r) => r.id));
+  const dealOf = (t: Training) => t.days[0].deal_id ?? "";
   const fileCount = new Map<string, number>();
   for (const f of files.data) fileCount.set(f.deal_id, (fileCount.get(f.deal_id) ?? 0) + 1);
 
@@ -66,13 +74,13 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
   const byName = (a: [string, string], b: [string, string]) => a[1].localeCompare(b[1]);
 
   const scoped = trainings.filter((t) => (!growth || t.requestedBy === growth) && (!trainer || t.trainers.some((x) => x.id === trainer)));
-  const rows = scoped.filter((t) => (!state || t.content === state) && (!soon || startsSoon(t)));
+  const rows = scoped.filter((t) => (!state || t.content === state) && (!soon || startsSoon(t)) && (!review || awaiting.has(dealOf(t))));
 
   const link = (p: Record<string, string>) => {
     const q = new URLSearchParams({ ...(growth ? { growth } : {}), ...(trainer ? { trainer } : {}), ...p }).toString();
     return q ? `/content?${q}` : "/content";
   };
-  const active = (key: string) => (key === "all" ? !state && !soon : key === "soon" ? soon : state === key);
+  const active = (key: string) => (key === "all" ? !state && !soon && !review : key === "soon" ? soon : key === "review" ? review : state === key);
   const tile = (key: string, label: string, n: number, href: string) => (
     <Link key={key} href={href} className={`rounded-xl p-3 transition hover:brightness-95 ${key === "all" ? "stat-hot text-white" : "border border-ice2 bg-ice"} ${active(key) ? "ring-2 ring-royal ring-offset-2" : ""}`}>
       <div className={`text-2xl font-bold tabular-nums ${key === "all" ? "" : key === "soon" && n ? "text-bad" : "text-royal-deep"}`}>{n}</div>
@@ -84,9 +92,10 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
     <div className="space-y-5">
       <PageHeader kicker="Content" title={<>Content requests</>} lead={<>Every deal Growth sends lands here. Open a training to read the brief, prepare the guide and files, then submit them to the trainer.</>} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {tile("all", "All requests", scoped.length, link({}))}
         {STATES.map((s) => tile(s, LABEL[s], scoped.filter((t) => t.content === s).length, link({ state: s })))}
+        {tile("review", "Awaiting approval", scoped.filter((t) => awaiting.has(dealOf(t))).length, link({ review: "1" }))}
         {tile("soon", `Starts within ${SOON_DAYS} days`, scoped.filter(startsSoon).length, link({ soon: "1" }))}
       </div>
 
@@ -104,8 +113,9 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
           {STATES.map((s) => <option key={s} value={s}>{LABEL[s]}</option>)}
         </AutoSelect>
         {soon && <input type="hidden" name="soon" value="1" />}
+        {review && <input type="hidden" name="review" value="1" />}
         <noscript><button className="btn-ghost btn-sm">Filter</button></noscript>
-        {(state || soon || growth || trainer) && <Link href="/content" className="text-sm text-blue hover:underline">Clear filters</Link>}
+        {(state || soon || review || growth || trainer) && <Link href="/content" className="text-sm text-blue hover:underline">Clear filters</Link>}
       </form>
 
       <section className="card overflow-x-auto p-0">
@@ -114,8 +124,8 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
             <tr><th>Date</th><th>Company</th><th>Training</th><th>Industry</th><th>Growth lead</th><th>Trainer</th><th>Files</th><th>Content status</th><th>Submitted</th></tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={9} className="py-8 text-center text-muted">{!state && !soon ? "No content requests yet." : "Nothing here."}</td></tr>}
-            {rows.map((t) => <Row key={t.key} t={t} files={fileCount.get(t.days[0].deal_id ?? "") ?? 0} soon={startsSoon(t)} />)}
+            {rows.length === 0 && <tr><td colSpan={9} className="py-8 text-center text-muted">{!state && !soon && !review ? "No content requests yet." : "Nothing here."}</td></tr>}
+            {rows.map((t) => <Row key={t.key} t={t} files={fileCount.get(dealOf(t)) ?? 0} soon={startsSoon(t)} review={awaiting.has(dealOf(t)) ? "awaiting" : returned.has(dealOf(t)) ? "returned" : null} />)}
           </tbody>
         </table>
       </section>
@@ -123,7 +133,7 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
   );
 }
 
-function Row({ t, files, soon }: { t: Training; files: number; soon: boolean }) {
+function Row({ t, files, soon, review }: { t: Training; files: number; soon: boolean; review: "awaiting" | "returned" | null }) {
   const dayCount = t.live || t.days.length;
   const state = t.content as State;
   return (
@@ -142,7 +152,11 @@ function Row({ t, files, soon }: { t: Training; files: number; soon: boolean }) 
       <td className="text-sm">{t.requestedByName ?? "—"}</td>
       <td className="text-sm">{t.trainers.length ? t.trainers.map((x) => x.name).join(", ") : <span className="text-muted">Not assigned yet</span>}</td>
       <td className="text-sm tabular-nums">{files || <span className="text-muted">—</span>}</td>
-      <td><span className={`badge whitespace-nowrap ${CONTENT_STYLE[state]}`}>{LABEL[state]}</span></td>
+      <td>
+        <span className={`badge whitespace-nowrap ${CONTENT_STYLE[state]}`}>{LABEL[state]}</span>
+        {review === "awaiting" && <div className="mt-1"><span className="badge whitespace-nowrap bg-[#E2EBFE] text-royal">Awaiting approval</span></div>}
+        {review === "returned" && <div className="mt-1"><span className="badge whitespace-nowrap bg-warn-bg text-warn">Changes requested</span></div>}
+      </td>
       <td className="whitespace-nowrap text-sm">{t.contentSubmittedAt ? fmtDate(t.contentSubmittedAt.slice(0, 10), { day: "numeric", month: "short", year: "numeric" }) : <span className="text-muted">—</span>}</td>
     </tr>
   );

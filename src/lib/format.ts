@@ -85,6 +85,8 @@ export const AUDIT_LABEL: Record<string, string> = {
   material_uploaded: "Material uploaded",
   content_uploaded: "Content file uploaded",
   content_submitted: "Content submitted",
+  content_review_requested: "Content sent for approval",
+  content_review_returned: "Content sent back for changes",
   trainer_created: "Trainer profile created",
   trainer_invited: "Trainer invited",
   trainer_deleted: "Trainer profile deleted",

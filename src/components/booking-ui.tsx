@@ -31,23 +31,28 @@ export function RespondBox({ id }: { id: string }) {
       }
     });
   return (
-    <div className="rounded-2xl border-2 border-blue bg-[#F3F7FF] p-4">
-      <h2 className="h2">Please confirm this assignment</h2>
-      <p className="mb-3 text-sm text-muted">Confirm that you received it and will deliver the training.</p>
-      {declining && <textarea className="input mb-2" rows={2} placeholder="Why can't you take it?" value={comment} onChange={(e) => setComment(e.target.value)} />}
-      <div className="flex flex-wrap gap-2">
-        {!declining ? (
-          <>
-            <button className="btn" disabled={pending} onClick={() => go(true)}>✓ I confirm</button>
-            <button className="btn-ghost" disabled={pending} onClick={() => setDeclining(true)}>I can&apos;t take it</button>
-          </>
-        ) : (
-          <>
-            <button className="btn-danger" disabled={pending} onClick={() => go(false)}>Send decline</button>
-            <button className="btn-ghost" onClick={() => setDeclining(false)}>Back</button>
-          </>
-        )}
+    <div className="ds-card relative overflow-hidden border-ds-primary/40 bg-ds-primary-soft/60 p-5">
+      <div aria-hidden className="absolute inset-y-0 left-0 w-1 bg-ds-primary" />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-ds-heading">Please confirm this training</h2>
+          <p className="text-sm text-ds-text">Confirm that you received it and will deliver it. The feedback QR code unlocks once you confirm.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {!declining ? (
+            <>
+              <button className="ds-btn ds-btn-primary" disabled={pending} onClick={() => go(true)}>✓ I confirm</button>
+              <button className="ds-btn border border-ds-border bg-ds-surface text-ds-heading hover:border-ds-primary/50" disabled={pending} onClick={() => setDeclining(true)}>I can&apos;t take it</button>
+            </>
+          ) : (
+            <>
+              <button className="ds-btn bg-bad text-white hover:brightness-110" disabled={pending} onClick={() => go(false)}>Send decline</button>
+              <button className="ds-btn border border-ds-border bg-ds-surface text-ds-heading" onClick={() => setDeclining(false)}>Back</button>
+            </>
+          )}
+        </div>
       </div>
+      {declining && <textarea className="mt-3 w-full rounded-xl border border-ds-border bg-ds-surface px-4 py-3 text-sm outline-none focus:border-ds-primary focus:ring-2 focus:ring-ds-primary/20" rows={2} placeholder="Why can't you take it?" value={comment} onChange={(e) => setComment(e.target.value)} />}
       <Msg m={m} />
     </div>
   );

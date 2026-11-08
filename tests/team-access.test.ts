@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACCESS,
   applyCategory,
+  approvesContent,
   canManageTeam,
   dropCategory,
   cleanPermissions,
@@ -145,4 +146,17 @@ describe("access invites", () => {
     expect(inviteProblem(sent, "u1", new Date("2026-11-09T10:00:01Z").getTime())).toMatch(/expired/);
     expect(inviteProblem(sent, "someone-else", now)).toMatch(/another account/);
   });
+});
+
+describe("content approval", () => {
+  const contentAdmin = { id: "ca", role: "content", real_role: "content", team_admin_of: ["content"], permissions: [] };
+  const contentMember = { id: "cm", role: "content", real_role: "content", team_admin_of: [], permissions: ["content.view", "content.write", "content.submit"] };
+  it("content admins and company admins submit straight to the trainer", () => {
+    expect(approvesContent(contentAdmin)).toBe(true);
+    expect(approvesContent(companyAdmin)).toBe(true);
+    expect(approvesContent({ ...companyAdmin, role: "content" })).toBe(true);
+  });
+  it("a content member, even with Submit content, needs approval", () => expect(approvesContent(contentMember)).toBe(false));
+  it("a content admin's rights count only in the content view", () => expect(approvesContent({ ...contentAdmin, role: "trainer" })).toBe(false));
+  it("other portals' admins can't approve content", () => expect(approvesContent(growthLead)).toBe(false));
 });

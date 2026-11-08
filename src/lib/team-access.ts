@@ -36,7 +36,7 @@ export const ACCESS: Record<Team, AccessDef[]> = {
   content: [
     { key: "content.view", label: "View content requests", hint: "See deals, audience, proposal and training days" },
     { key: "content.write", label: "Write content", hint: "Write the guide and upload or delete files" },
-    { key: "content.submit", label: "Submit content", hint: "Send the content to trainers (notifies everyone)" },
+    { key: "content.submit", label: "Submit content", hint: "Send the content to trainers; members need a content admin's approval first" },
     { key: "content.emails", label: "Get emails", hint: "New deal and content emails" },
   ],
 };
@@ -63,6 +63,13 @@ export const hasAnyAccess = (u: Actor, ...keys: string[]) => keys.some((k) => ha
 // Portal admin rights only count while working in that portal's view.
 export function ledTeam(u: Actor): Team | null {
   return isTeam(u.role) && (u.team_admin_of ?? []).includes(u.role) ? u.role : null;
+}
+
+// Content goes straight to the trainer when a content admin (or a company admin) submits it;
+// a content member's submission waits for a content admin's approval.
+export function approvesContent(u: Actor) {
+  if (u.role === "admin") return true;
+  return u.role === "content" && (u.real_role === "admin" || (u.team_admin_of ?? []).includes("content"));
 }
 
 export function canManageTeam(u: Actor, team: Team) {
