@@ -7,7 +7,7 @@ import { db } from "@/lib/supabase";
 import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
 import { isUuid } from "@/lib/format";
 import { hasUnprintable } from "@/lib/pdf-text";
-import { ensureAuthUser, rolesText, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
+import { ensureAuthUser, rolesText, sendInvite, sendTeamAdded, STAFF_ROLES } from "@/lib/team-invite";
 import { applyCategory, cleanPermissions, dropCategory, isCategory, TEAM_LABEL, type Category } from "@/lib/team-access";
 import { audit } from "@/lib/notify";
 
@@ -206,10 +206,28 @@ export async function addTeamMember(fd: FormData) {
   const portalAdmin = isPortalAdmin(fd);
   const bad = accessError(category, picked, portalAdmin);
   if (bad) return { error: bad };
-  // Adding never overwrites someone who already has access: their access is changed on their page instead.
-  const { data: existing } = await db().from("app_users").select("id, roles, team_admin_of, permissions").eq("email", email).maybeSingle();
-  const cur = existing as (AccessRow & { id: string }) | null;
-  if (cur && isStaffRoles(cur.roles ?? [])) return { error: "That person is already on the team. Open them in the list to change their access." };
+  const { data: existing } = await db().from("app_users").select("id, full_name, roles, team_admin_of, permissions").eq("email", email).maybeSingle();
+  const cur = existing as (AccessRow & { id: string; full_name: string }) | null;
+  // Someone already on the team (a company admin included) simply gets this category too; nothing else changes.
+  if (cur && isStaffRoles(cur.roles ?? [])) {
+    if ((cur.roles ?? []).includes(category)) return { error: `They already have ${CATEGORY_TEXT[category]}. Open them in the list to change their access.` };
+    const next = applyCategory(accessOf(cur), category, picked, portalAdmin);
+    const { error } = await db().from("app_users").update({ role: mainRole(next.roles), ...next }).eq("id", cur.id);
+    if (error) return failed("addTeamMember", error);
+    await audit(me.id, "team_admin_changed", null, { id: cur.id, added_category: category, portal_admin: portalAdmin, access: next.permissions });
+    let told = true;
+    // They already sign in, so no set-password link (and none to yourself).
+    if (cur.id !== me.id) {
+      try {
+        await sendTeamAdded(email, cur.full_name, CATEGORY_TEXT[category]);
+      } catch (e) {
+        console.error("[addTeamMember notice]", e instanceof Error ? e.message : e);
+        told = false;
+      }
+    }
+    revalidatePath("/admin/users");
+    redirect(`/admin/users?${new URLSearchParams({ extended: cur.full_name, category: CATEGORY_TEXT[category], ...(told ? {} : { unsent: email }) })}`);
+  }
   let sent = true;
   try {
     const { id } = await ensureAuthUser(email);
