@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProfileView } from "@/components/profile";
-import { canManageTrainers, requireRole } from "@/lib/auth";
+import { canManageTrainers, requireAccess } from "@/lib/auth";
 import { getTrainerProfiles } from "@/lib/scoring";
 
 export default async function TrainerPage({ params }: PageProps<"/trainers/[id]">) {
-  const me = await requireRole("admin", "approver", "growth");
+  const me = await requireAccess("growth.trainers", "te.trainers", "te.find", "te.assign");
   const { id } = await params;
   const [t] = await getTrainerProfiles([id]);
   if (!t) notFound();

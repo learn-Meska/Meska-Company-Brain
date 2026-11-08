@@ -1,6 +1,6 @@
 import { Bell } from "@/components/bell";
 import { Nav, type NavItem } from "@/components/nav";
-import { canBook, canEditSettings, requireUser, ROLE_LABEL } from "@/lib/auth";
+import { can, canEditSettings, requireUser, ROLE_LABEL } from "@/lib/auth";
 import { setViewAs, signOut } from "@/app/auth/actions";
 import { ViewSwitcher } from "@/components/view-switcher";
 import { ledTeam } from "@/lib/team-access";
@@ -8,21 +8,22 @@ import { ledTeam } from "@/lib/team-access";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const u = await requireUser();
   const items: NavItem[] = [];
-  if (u.role === "content") {
-    items.push({ href: "/content", label: "Content requests" });
-  } else if (u.role !== "trainer") {
-    if (canBook(u)) items.push({ href: "/dashboard", label: "Dashboard" }, { href: "/compensation", label: "Compensation" });
+  const has = (k: string) => can(u, k);
+  if (u.role !== "trainer") {
+    if (has("te.dashboard")) items.push({ href: "/dashboard", label: "Dashboard" });
+    if (has("te.compensation")) items.push({ href: "/compensation", label: "Compensation" });
     // Training Excellence and admins follow every training on the dashboard; Growth sends deals and has its own list.
-    if (u.role === "growth") items.push({ href: "/request", label: "New deal" });
-    if (canBook(u)) items.push({ href: "/find", label: "Find a trainer" });
-    items.push({ href: "/calendar", label: "Calendar" });
-    if (u.role === "growth") items.push({ href: "/bookings", label: "All bookings" });
-    items.push({ href: "/trainers", label: "Trainers" });
-    if (u.role === "admin") items.push({ href: "/content", label: "Content requests" });
+    if (u.role === "growth" && has("growth.new_deal")) items.push({ href: "/request", label: "New deal" });
+    if (u.role === "approver" && has("te.assign") && !has("te.dashboard")) items.push({ href: "/request", label: "Request a training" });
+    if (has("te.find")) items.push({ href: "/find", label: "Find a trainer" });
+    if (has("te.find") || has("te.dashboard") || has("growth.calendar")) items.push({ href: "/calendar", label: "Calendar" });
+    if (u.role === "growth") items.push({ href: "/bookings", label: has("growth.all_bookings") ? "All bookings" : "My bookings" });
+    if (has("growth.trainers") || has("te.trainers") || has("te.find") || has("te.assign")) items.push({ href: "/trainers", label: "Trainers" });
+    if (has("content.view")) items.push({ href: "/content", label: "Content requests" });
     if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
     else if (canEditSettings(u)) items.push({ href: "/admin/settings", label: "Scoring & lists" });
   }
-  // Team admins manage the people in the team they're working in.
+  // Portal admins manage the people in the portal they're working in.
   if (ledTeam(u)) items.push({ href: "/team", label: "My team" });
   // Staff who also deliver trainings (e.g. the L&D director) get the trainer pages too.
   if (u.trainer_id && (u.role === u.real_role || u.role === "trainer")) {

@@ -1,11 +1,11 @@
 import { PageHeader } from "@/components/page-header";
 import { RequestBuilder } from "@/components/request-builder";
-import { requireRole } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { todayISO } from "@/lib/format";
 
 export default async function RequestPage() {
-  const me = await requireRole("growth", "admin", "approver");
+  const me = await requireAccess("growth.new_deal", "te.assign");
   const { data: industries } = await db().from("lookups").select("id, name").eq("kind", "industry").order("sort");
   return (
     <div className="space-y-5">

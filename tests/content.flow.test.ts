@@ -17,14 +17,24 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/supabase", () => ({ db: () => h.fake.client, authClient: async () => ({}) }));
-vi.mock("@/lib/auth", () => ({
+vi.mock("@/lib/auth", async () => {
+  // The test user acts as the admin of their portal, so they hold every access of it.
+  const { hasAnyAccess } = await import("../src/lib/team-access");
+  const asLead = () => ({ ...h.me, real_role: h.me.role, team_admin_of: [h.me.role] });
+  return {
   requireRole: async (...roles: string[]) => {
     if (!roles.includes(h.me.role)) throw new Error("NEXT_REDIRECT /");
     return h.me;
   },
+  requireAccess: async (...keys: string[]) => {
+    if (!hasAnyAccess(asLead(), ...keys)) throw new Error("NEXT_REDIRECT /");
+    return h.me;
+  },
+  can: (_u: unknown, key: string) => hasAnyAccess(asLead(), key),
   requireUser: async () => h.me,
   canManageContent: (u: { role: string }) => u.role === "admin" || u.role === "content",
-}));
+};
+});
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/notify", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/notify")>();

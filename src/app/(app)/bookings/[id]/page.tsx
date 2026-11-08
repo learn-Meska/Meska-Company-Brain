@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Form, Submit } from "@/components/form";
 import { Ticket } from "@/components/ticket";
 import { DealCard } from "@/components/deal-card";
-import { canBook, requireRole } from "@/lib/auth";
+import { can, canBook, requireRole } from "@/lib/auth";
 import { AssignPanel } from "@/components/assign-panel";
 import { db } from "@/lib/supabase";
 import { ACTIVE_STATUSES, fmtDateTime } from "@/lib/format";
@@ -20,16 +20,20 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   const { data } = await db().from("bookings").select(BOOKING_SELECT).eq("id", id).maybeSingle();
   if (!data) notFound();
   const b = data as BookingRow;
+  // Growth without "See all bookings" only opens their own requests.
+  if (me.role === "growth" && !can(me, "growth.all_bookings") && b.created_by !== me.id) notFound();
   const [{ data: logs }, rule] = await Promise.all([
     db().from("audit_log").select("*, app_users(full_name)").eq("booking_id", id).order("created_at"),
     getSetting("cancellation", { notice_hours: 48, min_reason_chars: 150 }),
   ]);
-  const canChange = ACTIVE_STATUSES.includes(b.status) && (canBook(me) || (me.role === "growth" && ["needs_trainer", "awaiting_trainer"].includes(b.status) && b.created_by === me.id));
+  const ownRequest = can(me, "growth.new_deal") && b.created_by === me.id;
+  const canChange = ACTIVE_STATUSES.includes(b.status) && (can(me, "te.edit") || (ownRequest && ["needs_trainer", "awaiting_trainer"].includes(b.status)));
+  const canCancel = ACTIVE_STATUSES.includes(b.status) && (can(me, "te.cancel") || (ownRequest && ["needs_trainer", "awaiting_trainer"].includes(b.status)));
   const { requested } = await searchParams;
   const showReason = me.role === "admin";
   return (
     <div className="space-y-5">
-      {canBook(me) ? <Link href={`/dashboard/${b.id}`} className="text-sm text-blue hover:underline">← Dashboard</Link> : <Link href="/bookings" className="text-sm text-blue hover:underline">← All bookings</Link>}
+      {can(me, "te.dashboard") ? <Link href={`/dashboard/${b.id}`} className="text-sm text-blue hover:underline">← Dashboard</Link> : <Link href="/bookings" className="text-sm text-blue hover:underline">← All bookings</Link>}
       {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and Training Excellence was notified." : "Request sent. It's on the calendar as “Needs a trainer” and Training Excellence was notified."}</p>}
       {b.status === "needs_trainer" && canBook(me) && (
         <section className="card border-2 border-[#F4A9C4]">
@@ -41,9 +45,9 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
       )}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <Ticket b={b} canUpload={me.role === "admin" && b.status !== "cancelled"} />
-      {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} />}
+      {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} showValue={can(me, "te.deal_value") || can(me, "growth.deal_value")} />}
 
-      {ACTIVE_STATUSES.includes(b.status) && (canBook(me) || b.created_by === me.id) && (
+      {ACTIVE_STATUSES.includes(b.status) && (can(me, "te.edit") || ownRequest) && (
         <section className="card">
           <h2 className="h2 mb-1">Client point of contact</h2>
           <p className="mb-3 text-xs text-muted">{b.batch_id ? "Saved for every day of this request. " : ""}Only the Meska team sees it; trainers don&apos;t.</p>
@@ -57,11 +61,12 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
         </section>
       )}
 
-      {canChange && (
+      {(canChange || canCancel) && (
         <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
+          {canChange && (
           <section className="card">
             <h2 className="h2 mb-1">Edit training</h2>
-            <p className="mb-3 text-xs text-muted">The trainer, admins and Training Excellence are notified of what changed. {canBook(me) ? <>To change the trainer, open the training on the <Link href={`/dashboard/${b.id}`} className="text-blue hover:underline">dashboard</Link>.</> : "To change the trainer, cancel and book again."}</p>
+            <p className="mb-3 text-xs text-muted">The trainer, admins and Training Excellence are notified of what changed. {can(me, "te.dashboard") ? <>To change the trainer, open the training on the <Link href={`/dashboard/${b.id}`} className="text-blue hover:underline">dashboard</Link>.</> : "To change the trainer, cancel and book again."}</p>
             <Form action={editBooking} className="grid gap-3 sm:grid-cols-2">
               <input type="hidden" name="id" value={b.id} />
               <div className="sm:col-span-2 grid grid-cols-[1fr_90px] gap-3">
@@ -78,6 +83,8 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
               <div><Submit>Save changes</Submit></div>
             </Form>
           </section>
+          )}
+          {canCancel && (
           <section className="card">
             <h2 className="h2 mb-1 text-bad">Cancel training</h2>
             <p className="mb-3 text-xs text-muted">
@@ -89,6 +96,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
               <Submit className="btn-danger" pending="Cancelling…">Cancel this training</Submit>
             </Form>
           </section>
+          )}
         </div>
       )}
 

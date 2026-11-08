@@ -1,13 +1,13 @@
 import { PageHeader } from "@/components/page-header";
 import { TrainerFinder } from "@/components/trainer-finder";
-import { requireRole } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { todayISO } from "@/lib/format";
 
 type L = { id: string; kind: string; name: string };
 
 export default async function FindPage() {
-  await requireRole("admin", "approver");
+  await requireAccess("te.find");
   const [{ data: lookups }, { data: skills }] = await Promise.all([db().from("lookups").select("*").order("sort"), db().from("skills").select("id, name").order("name")]);
   const L = (lookups ?? []) as L[];
   const pick = (k: string) => L.filter((l) => l.kind === k).map(({ id, name }) => ({ id, name }));

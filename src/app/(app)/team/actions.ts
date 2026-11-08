@@ -6,13 +6,13 @@ import { mainRole, requireUser, type CurrentUser } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { isUuid } from "@/lib/format";
 import { audit } from "@/lib/notify";
-import { cleanTeamAdmin, ledTeam, memberChangeError, TEAM_LABEL, withoutTeam, type Team } from "@/lib/team-access";
+import { cleanPermissions, cleanTeamAdmin, ledTeam, memberChangeError, TEAM_LABEL, withoutTeam, withPortalAccess, type Team } from "@/lib/team-access";
 import { ensureAuthUser, sendInvite, sendTeamAdded, STAFF_ROLES } from "@/lib/team-invite";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Member = { id: string; email: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null };
+type Member = { id: string; email: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
 
 // Every action here works on the team the signed-in team admin is leading right now.
 async function requireTeamAdmin(): Promise<{ me: CurrentUser; team: Team }> {
@@ -24,7 +24,7 @@ async function requireTeamAdmin(): Promise<{ me: CurrentUser; team: Team }> {
 
 async function loadMember(id: string) {
   if (!isUuid(id)) return null;
-  const { data } = await db().from("app_users").select("id, email, full_name, roles, team_admin_of").eq("id", id).maybeSingle();
+  const { data } = await db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle();
   return (data as Member | null) ?? null;
 }
 
@@ -38,14 +38,15 @@ export async function addToMyTeam(fd: FormData) {
   const { me, team } = await requireTeamAdmin();
   const email = str(fd, "email").toLowerCase();
   const full_name = str(fd, "full_name");
-  const makeAdmin = fd.get("team_admin") === "on";
+  const makeAdmin = fd.getAll("team_admin").map(String).includes(team);
+  const picked = fd.getAll("access").map(String);
   if (!email || !full_name) return { error: "Enter a name and email." };
   if (!EMAIL.test(email)) return { error: "Enter a valid email address." };
   if (full_name.length > 120) return { error: "Keep the name under 120 characters." };
   const label = TEAM_LABEL[team];
 
-  const { data: existing } = await db().from("app_users").select("id, full_name, roles, team_admin_of").eq("email", email).maybeSingle();
-  const cur = existing as { id: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null } | null;
+  const { data: existing } = await db().from("app_users").select("id, full_name, roles, team_admin_of, permissions").eq("email", email).maybeSingle();
+  const cur = existing as { id: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null } | null;
   const held = cur?.roles ?? [];
   if (held.includes(team)) return { error: `That person is already in ${label}.` };
   // Someone already on another team keeps their access and simply gets this team too.
@@ -58,14 +59,15 @@ export async function addToMyTeam(fd: FormData) {
     await db().auth.admin.updateUserById(id, { ban_duration: "none" });
     const roles = [...new Set([...held, team])];
     const team_admin_of = cleanTeamAdmin(roles, [...(cur?.team_admin_of ?? []), ...(makeAdmin ? [team] : [])]);
+    const permissions = cleanPermissions(roles, withPortalAccess(cur?.permissions ?? [], team, picked));
     const { error } = await db()
       .from("app_users")
-      .upsert({ id, email, full_name: cur?.full_name ?? full_name, role: mainRole(roles), roles, team_admin_of });
+      .upsert({ id, email, full_name: cur?.full_name ?? full_name, role: mainRole(roles), roles, team_admin_of, permissions });
     if (error) {
       console.error("[addToMyTeam]", error.message);
       return { error: "Couldn't save. Please try again." };
     }
-    await audit(me.id, "team_member_added", null, { email, roles: [team], team_admin: makeAdmin, by_team_admin: team });
+    await audit(me.id, "team_member_added", null, { email, roles: [team], team_admin: makeAdmin, access: permissions.filter((k) => picked.includes(k)), by_team_admin: team });
     if (signsIn) await sendTeamAdded(email, cur?.full_name ?? full_name, label);
     else await sendInvite(email, full_name, label);
   } catch (e) {
@@ -75,23 +77,24 @@ export async function addToMyTeam(fd: FormData) {
   return done(`${full_name} was added to ${label} and emailed.`);
 }
 
-export async function setTeamAdmin(fd: FormData) {
+// Sets one member's accesses in this portal, and whether they're a portal admin.
+export async function setMemberAccess(fd: FormData) {
   const { me, team } = await requireTeamAdmin();
-  const lead = str(fd, "lead") === "1";
   const m = await loadMember(str(fd, "id"));
-  const err = memberChangeError(me, team, m, lead ? "lead" : "unlead");
+  const err = memberChangeError(me, team, m, "access");
   if (err || !m) return { error: err ?? "Member not found." };
-  const next = lead ? [...(m.team_admin_of ?? []), team] : (m.team_admin_of ?? []).filter((t) => t !== team);
-  const { error } = await db()
-    .from("app_users")
-    .update({ team_admin_of: cleanTeamAdmin(m.roles ?? [], next) })
-    .eq("id", m.id);
+  const lead = fd.getAll("team_admin").map(String).includes(team);
+  const picked = fd.getAll("access").map(String);
+  const roles = m.roles ?? [];
+  const team_admin_of = cleanTeamAdmin(roles, lead ? [...(m.team_admin_of ?? []), team] : (m.team_admin_of ?? []).filter((t) => t !== team));
+  const permissions = cleanPermissions(roles, withPortalAccess(m.permissions ?? [], team, picked));
+  const { error } = await db().from("app_users").update({ team_admin_of, permissions }).eq("id", m.id).contains("roles", [team]);
   if (error) {
-    console.error("[setTeamAdmin]", error.message);
+    console.error("[setMemberAccess]", error.message);
     return { error: "Couldn't save. Please try again." };
   }
-  await audit(me.id, "team_admin_changed", null, { id: m.id, team, team_admin: lead });
-  return done(lead ? `${m.full_name} is now a ${TEAM_LABEL[team]} admin.` : `${m.full_name} is now a member.`);
+  await audit(me.id, "team_admin_changed", null, { id: m.id, team, portal_admin: lead, access: permissions.filter((k) => k.startsWith(team === "approver" ? "te." : `${team}.`)) });
+  return done(`Access saved for ${m.full_name}.`);
 }
 
 // Takes away this team only. Someone left with no team and no trainer profile can't sign in any more.
@@ -103,7 +106,7 @@ export async function removeFromMyTeam(fd: FormData) {
   const next = withoutTeam(m, team);
   const { error } = await db()
     .from("app_users")
-    .update({ roles: next.roles, team_admin_of: next.team_admin_of, role: mainRole(next.roles) })
+    .update({ roles: next.roles, team_admin_of: next.team_admin_of, permissions: next.permissions, role: mainRole(next.roles) })
     .eq("id", m.id)
     // only if they're still in the team we checked
     .contains("roles", [team]);

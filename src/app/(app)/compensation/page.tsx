@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CompensationCards, CompensationTable } from "@/components/compensation";
 import { Form, Submit } from "@/components/form";
 import { PageHeader } from "@/components/page-header";
-import { requireRole } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth";
 import { CompensationFields, type TrainerOption, type TrainingOption } from "@/components/compensation-fields";
 import { ASSIGNED_STATUSES, COMPENSATION_COLUMNS, trainingLabel, type CompensationLine } from "@/lib/compensation";
 import { fmtDate, isUuid } from "@/lib/format";
@@ -14,7 +14,7 @@ type AssignedDay = { id: string; trainer_id: string; date: string; status: strin
 // Training Excellence chooses the trainer and one of their assigned trainings, and types the pay; nothing here is calculated.
 // Trainers see their own lines on /me/compensation.
 export default async function CompensationPage({ searchParams }: PageProps<"/compensation">) {
-  await requireRole("approver", "admin");
+  await requireAccess("te.compensation");
   const params = await searchParams;
   const trainer = isUuid(params.trainer) ? params.trainer : "";
   const editId = isUuid(params.edit) ? params.edit : "";

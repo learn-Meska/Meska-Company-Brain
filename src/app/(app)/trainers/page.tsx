@@ -2,11 +2,11 @@ import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { TierBadge } from "@/components/profile";
 import { fmtNps } from "@/lib/survey";
-import { canManageTrainers, requireRole } from "@/lib/auth";
+import { canManageTrainers, requireAccess } from "@/lib/auth";
 import { getTrainerProfiles } from "@/lib/scoring";
 
 export default async function TrainersPage() {
-  const me = await requireRole("admin", "approver", "growth");
+  const me = await requireAccess("growth.trainers", "te.trainers", "te.find", "te.assign");
   const trainers = (await getTrainerProfiles()).sort((a, b) => b.total - a.total);
   return (
     <div className="space-y-6">

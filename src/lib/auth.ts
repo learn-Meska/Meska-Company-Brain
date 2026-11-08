@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import { authClient, db } from "./supabase";
+import { hasAccess, hasAnyAccess, homePath } from "./team-access";
 
 export type Role = "admin" | "approver" | "growth" | "content" | "trainer";
 
@@ -19,6 +20,8 @@ export type CurrentUser = {
   views: Role[];
   // The teams (staff roles) this login leads as a team admin; see src/lib/team-access.ts.
   team_admin_of: string[];
+  // The portal accesses ticked for this login (keys like "te.assign"); see src/lib/team-access.ts.
+  permissions: string[];
 };
 
 const ROLE_ORDER: Role[] = ["admin", "approver", "growth", "content", "trainer"];
@@ -43,7 +46,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const { data: u } = await db().from("app_users").select("*").eq("id", uid).maybeSingle();
   if (!u) return null;
   const { data: t } = await db().from("trainers").select("id").eq("user_id", uid).maybeSingle();
-  const base = u as Omit<CurrentUser, "trainer_id" | "real_role" | "views" | "team_admin_of"> & { roles: Role[] | null; team_admin_of: string[] | null };
+  const base = u as Omit<CurrentUser, "trainer_id" | "real_role" | "views" | "team_admin_of" | "permissions"> & { roles: Role[] | null; team_admin_of: string[] | null; permissions: string[] | null };
   const trainerId = (t as { id: string } | null)?.id ?? null;
   // Removed from the team and not a trainer: no access, even while an old session is still valid.
   if (base.role === "trainer" && !(base.roles ?? []).length && !trainerId && (await removedMember(uid))) return null;
@@ -60,6 +63,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     real_role: base.role,
     trainer_id: trainerId,
     team_admin_of: base.team_admin_of ?? [],
+    permissions: base.permissions ?? [],
   };
 });
 
@@ -85,6 +89,14 @@ export async function requireRole(...roles: Role[]): Promise<CurrentUser> {
   return u;
 }
 
+// Any one of these portal accesses (company admins have them all).
+export async function requireAccess(...keys: string[]): Promise<CurrentUser> {
+  const u = await requireUser();
+  if (!hasAnyAccess(u, ...keys)) redirect("/");
+  return u;
+}
+export const can = (u: CurrentUser, key: string) => hasAccess(u, key);
+
 // Admins and Training Excellence create, edit and invite trainer profiles.
 export async function requireTrainerManager(): Promise<CurrentUser> {
   const u = await requireUser();
@@ -102,9 +114,9 @@ export async function requireTrainer(): Promise<CurrentUser & { trainer_id: stri
 
 export const ROLE_LABEL: Record<Role, string> = { admin: "Admin", approver: "Training Excellence", growth: "Growth", content: "Content", trainer: "Trainer" };
 
-export const canManageTrainers = (u: CurrentUser) => u.role === "admin" || u.role === "approver";
+export const canManageTrainers = (u: CurrentUser) => hasAccess(u, "te.trainers");
 // Scoring & lists (skills, filter lists, score categories, tiers, rules): admins and booking managers.
-export const canEditSettings = (u: CurrentUser) => u.role === "admin" || u.role === "approver" || u.can_manage_trainers;
+export const canEditSettings = (u: CurrentUser) => hasAccess(u, "te.settings");
 
 export async function requireSettingsEditor(): Promise<CurrentUser> {
   const u = await requireUser();
@@ -112,22 +124,11 @@ export async function requireSettingsEditor(): Promise<CurrentUser> {
   return u;
 }
 // Booking managers (L&D director, Mahmoud) and admins book trainers once a training is confirmed with the client.
-export const canBook = (u: CurrentUser) => u.role === "admin" || u.role === "approver";
+export const canBook = (u: CurrentUser) => hasAccess(u, "te.assign");
 export const isStaff = (u: CurrentUser) => u.role !== "trainer";
 // The content team (and admins) prepare the guide and files for each deal.
-export const canManageContent = (u: CurrentUser) => u.role === "admin" || u.role === "content";
+export const canManageContent = (u: CurrentUser) => hasAccess(u, "content.write");
 
 export function homeFor(u: CurrentUser) {
-  switch (u.role) {
-    case "trainer":
-      return "/me";
-    case "approver":
-      return "/dashboard";
-    case "growth":
-      return "/request";
-    case "content":
-      return "/content";
-    default:
-      return "/calendar";
-  }
+  return homePath(u);
 }

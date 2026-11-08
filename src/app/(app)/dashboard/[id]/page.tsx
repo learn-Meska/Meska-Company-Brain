@@ -8,7 +8,7 @@ import { Form, Submit } from "@/components/form";
 import { SwapIcon, TrashIcon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status";
-import { requireRole } from "@/lib/auth";
+import { can, requireAccess } from "@/lib/auth";
 import { buildTrainings, CONTENT_LABEL, isDeclined, isLive, STAGE_LABEL, type CycleDay, type CycleDeal } from "@/lib/cycle";
 import { getDealInfo } from "@/lib/deal-info";
 import { isAudioPath } from "@/lib/files";
@@ -24,7 +24,7 @@ type Material = { id: string; booking_id: string; file_name: string; file_path: 
 
 // One training across all its days: details, delivery reports, and reassigning or cancelling it.
 export default async function TrainingPage({ params }: PageProps<"/dashboard/[id]">) {
-  await requireRole("approver", "admin");
+  const me = await requireAccess("te.dashboard");
   const { id } = await params;
   if (!isUuid(id)) notFound();
   const { data } = await db().from("bookings").select(BOOKING_SELECT).eq("id", id).maybeSingle();
@@ -64,9 +64,9 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
     const mine = feedback.filter((f) => f.booking_id === bookingId);
     return { count: mine.length, score: nps(mine.map((f) => f.recommend).filter((x): x is number => x != null)) };
   };
-  const reassignable = days.filter((d) => d.trainer_id && !d.finished_at && d.date >= today && ["awaiting_trainer", "confirmed"].includes(d.status));
-  const toAssign = days.find((d) => d.status === "needs_trainer" && d.date >= today);
-  const cancellable = days.filter((d) => isLive(d) && !d.finished_at && (d.date >= today || d.status !== "confirmed"));
+  const reassignable = !can(me, "te.assign") ? [] : days.filter((d) => d.trainer_id && !d.finished_at && d.date >= today && ["awaiting_trainer", "confirmed"].includes(d.status));
+  const toAssign = !can(me, "te.assign") ? undefined : days.find((d) => d.status === "needs_trainer" && d.date >= today);
+  const cancellable = !can(me, "te.cancel") ? [] : days.filter((d) => isLive(d) && !d.finished_at && (d.date >= today || d.status !== "confirmed"));
   const reports = days.filter((d) => d.brief || d.finished_at || files.some((f) => f.booking_id === d.id));
   const facts: [string, React.ReactNode][] = [
     ["Growth lead", t.requestedByName ?? "—"],
@@ -208,7 +208,7 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
       </section>
 
       {b.deal_id ? (
-        <DealCard dealId={b.deal_id} bookingId={b.id} actions={trainingActions} />
+        <DealCard dealId={b.deal_id} bookingId={b.id} actions={trainingActions} showValue={can(me, "te.deal_value")} />
       ) : (
         trainingActions && <div className="grid gap-3 lg:grid-cols-2">{trainingActions}</div>
       )}

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { DownloadButton } from "@/components/booking-ui";
 import { ContentEditor } from "@/components/content-editor";
 import { PageHeader } from "@/components/page-header";
-import { requireRole } from "@/lib/auth";
+import { can, requireAccess } from "@/lib/auth";
 import { fmtDate, fmtTime, isUuid } from "@/lib/format";
 import { db } from "@/lib/supabase";
 
@@ -15,7 +15,7 @@ type ContentFile = { id: string; file_name: string; size_bytes: number | null };
 // One deal for the content team: the audience and the proposal to read, and where to put the content.
 // The deal's value is left out on purpose.
 export default async function ContentRequestPage({ params }: PageProps<"/content/[dealId]">) {
-  await requireRole("content", "admin");
+  const me = await requireAccess("content.view");
   const { dealId } = await params;
   if (!isUuid(dealId)) notFound();
   const [{ data: deal }, { data: days }, { data: people }, { data: files }] = await Promise.all([
@@ -95,7 +95,7 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
         </ul>
       </section>
 
-      <ContentEditor dealId={d.id} initialGuide={d.content_guide ?? ""} submittedAt={d.content_submitted_at} files={(files ?? []) as ContentFile[]} />
+      <ContentEditor dealId={d.id} initialGuide={d.content_guide ?? ""} submittedAt={d.content_submitted_at} files={(files ?? []) as ContentFile[]} canWrite={can(me, "content.write")} canSubmit={can(me, "content.submit")} />
     </div>
   );
 }

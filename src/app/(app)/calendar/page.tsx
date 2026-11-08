@@ -1,11 +1,11 @@
 import { MonthCalendar, monthGrid } from "@/components/month-calendar";
-import { canBook, requireRole } from "@/lib/auth";
+import { can, requireAccess } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 import { todayISO } from "@/lib/format";
 
 export default async function CalendarPage({ searchParams }: PageProps<"/calendar">) {
-  const me = await requireRole("admin", "approver", "growth");
+  const me = await requireAccess("growth.calendar", "te.find", "te.dashboard");
   const { m, trainer } = await searchParams;
   const grid = monthGrid(m);
   let q = db()
@@ -19,7 +19,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
   if (picked) q = q.eq("trainer_id", picked);
   // With one trainer picked, admins and booking managers see the days they marked available that still have a
   // free slot (today onwards). Growth only sees booked dates.
-  const showFree = !!picked && canBook(me);
+  const showFree = !!picked && can(me, "te.find");
   const from = [grid.cells[0], todayISO()].sort()[1];
   const to = grid.cells[grid.cells.length - 1];
   const [{ data }, { data: trainers }, { data: avail }, { data: locks }] = await Promise.all([

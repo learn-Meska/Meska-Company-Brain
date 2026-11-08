@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { canManageContent, requireRole, requireUser } from "@/lib/auth";
+import { can, requireAccess, requireUser } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { esc } from "@/lib/email";
 import { checkFile, downloadName, safeName } from "@/lib/files";
@@ -24,7 +24,7 @@ async function liveDeal(dealId: string) {
 
 // One-time URL so the browser uploads straight to storage (no server size limit).
 export async function createContentUpload(dealId: string, fileName: string) {
-  await requireRole("content", "admin");
+  await requireAccess("content.write");
   if (!(await liveDeal(dealId))) return { error: "Request not found." };
   const bad = checkFile(fileName);
   if (bad) return { error: bad };
@@ -35,7 +35,7 @@ export async function createContentUpload(dealId: string, fileName: string) {
 }
 
 export async function recordContentFile(dealId: string, path: string, fileName: string, size: number) {
-  const me = await requireRole("content", "admin");
+  const me = await requireAccess("content.write");
   const d = await liveDeal(dealId);
   if (!d) return { error: "Request not found." };
   // Only a path this app handed out for this deal.
@@ -50,7 +50,7 @@ export async function recordContentFile(dealId: string, path: string, fileName: 
 }
 
 export async function deleteContentFile(fileId: string) {
-  await requireRole("content", "admin");
+  await requireAccess("content.write");
   if (!isUuid(fileId)) return { error: "File not found." };
   const { data } = await db().from("deal_content").select("file_path, deal_id").eq("id", fileId).maybeSingle();
   const f = data as { file_path: string; deal_id: string } | null;
@@ -65,7 +65,7 @@ export async function deleteContentFile(fileId: string) {
 // Saves the written guide, marks the content as submitted and tells the trainers and the booking team.
 // Trainers see the content on their training only after this.
 export async function submitContent(dealId: string, guide: string) {
-  const me = await requireRole("content", "admin");
+  const me = await requireAccess("content.submit");
   const d = await liveDeal(dealId);
   if (!d) return { error: "Request not found." };
   const text = typeof guide === "string" ? guide.trim() : "";
@@ -131,7 +131,7 @@ export async function contentLink(fileId: string) {
       db().from("bookings").select("id").eq("deal_id", f.deal_id).eq("trainer_id", me.trainer_id).limit(1),
     ]);
     if (!(deal as { content_submitted_at: string | null } | null)?.content_submitted_at || !(mine ?? []).length) return { error: "File not found." };
-  } else if (!canManageContent(me) && me.role !== "approver" && me.role !== "growth") {
+  } else if (!(can(me, "content.view") || me.role === "approver" || me.role === "growth")) {
     return { error: "File not found." };
   }
   const { data: s, error } = await db().storage.from("materials").createSignedUrl(f.file_path, 300, { download: downloadName(f.file_name, f.file_path) });

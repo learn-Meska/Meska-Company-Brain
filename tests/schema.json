@@ -92,7 +92,8 @@
     "full_name",
     "role",
     "roles",
-    "team_admin_of"
+    "team_admin_of",
+    "permissions"
   ],
   "buckets": [
     "proposals"
