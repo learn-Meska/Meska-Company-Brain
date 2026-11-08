@@ -82,6 +82,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   return (
     <div className="space-y-5">
       <PageHeader kicker="Training Excellence" title={<>Dashboard</>} lead={<>Every training for every trainer. Click a training to see its details, reassign the trainer or cancel it.</>} />
+      {params.deleted && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">The training and everything attached to it were deleted.</p>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
         {tile(null, "All trainings", scoped.length)}

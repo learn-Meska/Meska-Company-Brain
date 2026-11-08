@@ -56,7 +56,7 @@ vi.mock("@/lib/notify", async (importOriginal) => {
   };
 });
 
-const { cancelTraining, createAudioUpload, reassignTraining, recordAudioFile, recordBriefFile, submitBrief } = await import("@/app/(app)/bookings/actions");
+const { cancelTraining, createAudioUpload, deleteTraining, reassignTraining, recordAudioFile, recordBriefFile, submitBrief } = await import("@/app/(app)/bookings/actions");
 
 const day = (id: string, n: number, over: Record<string, unknown> = {}) => ({
   id,
@@ -221,5 +221,35 @@ describe("marking a day as delivered", () => {
     h.me = { ...h.me, trainer_id: TRAINER };
     h.fake.tables.bookings = [day(TODAY_DAY, 1)];
     expect(await createAudioUpload(TODAY_DAY, "session.mp3")).toEqual({ error: expect.stringMatching(/once the training day/) });
+  });
+});
+
+describe("deleting a training", () => {
+  const asAdmin = () => void (h.me = { id: "admin-1", role: "admin", real_role: "admin", full_name: "Admin", trainer_id: null } as typeof h.me);
+
+  it("only company admins can delete, and only after typing DELETE", async () => {
+    await expect(deleteTraining(form({ id: NEXT_DAY, confirm: "DELETE" }))).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(h.fake.tables.bookings).toHaveLength(3);
+    asAdmin();
+    expect(await deleteTraining(form({ id: NEXT_DAY, confirm: "delet" }))).toEqual({ error: "Type DELETE to confirm." });
+    expect(h.fake.tables.bookings).toHaveLength(3);
+  });
+
+  it("removes the deal, every day and what hangs off them, then returns to the dashboard", async () => {
+    asAdmin();
+    h.fake.tables.deals = [{ id: DEAL, company_name: "Aman", proposal_path: "growth-1/p.pdf" }];
+    h.fake.tables.deal_participants = [{ deal_id: DEAL, name: "A" }];
+    h.fake.tables.deal_content = [{ deal_id: DEAL, file_path: `deals/${DEAL}/guide.pdf` }];
+    h.fake.tables.booking_materials = [{ id: "m1", booking_id: DONE_DAY, file_path: `${DONE_DAY}/brief-1.pdf`, kind: "brief" }];
+    h.fake.tables.notifications = [{ id: "n1", link: `/bookings/${NEXT_DAY}` }, { id: "n2", link: "/bookings/other" }];
+    await expect(deleteTraining(form({ id: NEXT_DAY, confirm: "DELETE" }))).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(h.fake.tables.bookings).toHaveLength(0);
+    expect(h.fake.tables.deals).toHaveLength(0);
+    expect(h.fake.tables.deal_participants).toHaveLength(0);
+    expect(h.fake.tables.deal_content).toHaveLength(0);
+    expect(h.fake.tables.booking_materials).toHaveLength(0);
+    expect(h.fake.tables.notifications.map((n) => n.id)).toEqual(["n2"]);
+    expect(h.audits).toEqual(["training_deleted"]);
+    expect(h.notified).toEqual([]);
   });
 });

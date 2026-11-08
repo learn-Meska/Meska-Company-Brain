@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { can, requireAccess, requireRole, requireTrainer, requireUser, type CurrentUser } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { esc, siteUrl } from "@/lib/email";
@@ -846,4 +847,60 @@ export async function submitBrief(bookingId: string, text: string) {
   revalidatePath(`/bookings/${bookingId}`);
   revalidatePath("/dashboard", "layout");
   return { ok: first ? "Training marked as delivered. Thank you, your brief and audio were sent to the team." : "Brief updated and the team was notified." };
+}
+
+/* ---------- Delete a whole training (company admins) ---------- */
+
+// Removes a training for good: its deal, every day, and everything hanging off them (participants, content,
+// materials, briefs, feedback, locks, notifications, stored files). Compensation lines and the activity log keep
+// their rows, unlinked. Nobody is emailed. The admin types DELETE to confirm.
+export async function deleteTraining(fd: FormData) {
+  const me = await requireRole("admin");
+  if (me.real_role !== "admin") return { error: "Only company admins can delete trainings." };
+  if (String(fd.get("confirm") ?? "").trim().toUpperCase() !== "DELETE") return { error: "Type DELETE to confirm." };
+  const [b] = await loadBookings([String(fd.get("id") ?? "")]);
+  if (!b) return { error: "Training not found." };
+  const days = await trainingDays(b);
+  const ids = days.map((d) => d.id);
+  const dealId = b.deal_id;
+
+  // Files first, while the rows that point at them still exist.
+  const [{ data: mats }, { data: contentFiles }, { data: deal }] = await Promise.all([
+    db().from("booking_materials").select("file_path").in("booking_id", ids),
+    dealId ? db().from("deal_content").select("file_path").eq("deal_id", dealId) : Promise.resolve({ data: [] }),
+    dealId ? db().from("deals").select("company_name, proposal_path").eq("id", dealId).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  const materialPaths = [...((mats ?? []) as { file_path: string }[]), ...((contentFiles ?? []) as { file_path: string }[])].map((m) => m.file_path);
+  const proposal = (deal as { company_name: string | null; proposal_path: string } | null)?.proposal_path;
+
+  const steps = [
+    db().from("feedback_responses").delete().in("booking_id", ids),
+    db().from("booking_materials").delete().in("booking_id", ids),
+    db().from("booking_locks").delete().in("booking_id", ids),
+    db().from("compensation_lines").update({ booking_id: null }).in("booking_id", ids),
+    db().from("audit_log").update({ booking_id: null }).in("booking_id", ids),
+  ];
+  for (const s of steps) {
+    const { error } = await s;
+    if (error) return { error: friendlyError(error.message) };
+  }
+  const { error: dayErr } = await db().from("bookings").delete().in("id", ids);
+  if (dayErr) return { error: friendlyError(dayErr.message) };
+  if (dealId) {
+    await db().from("deal_content").delete().eq("deal_id", dealId);
+    await db().from("deal_participants").delete().eq("deal_id", dealId);
+    const { error } = await db().from("deals").delete().eq("id", dealId);
+    if (error) return { error: friendlyError(error.message) };
+  }
+  // Bell items that would now open a missing page.
+  const links = [...ids.flatMap((id) => [`/bookings/${id}`, `/dashboard/${id}`, `/me/bookings/${id}`]), ...(dealId ? [`/content/${dealId}`] : [])];
+  await db().from("notifications").delete().in("link", links);
+  if (materialPaths.length) await db().storage.from("materials").remove(materialPaths);
+  if (proposal) await db().storage.from("proposals").remove([proposal]);
+
+  await audit(me.id, "training_deleted", null, { program: b.program_name, company: (deal as { company_name: string | null } | null)?.company_name ?? null, deal: dealId, days: ids.length });
+  refreshTraining();
+  revalidatePath("/content", "layout");
+  revalidatePath("/calendar");
+  redirect("/dashboard?deleted=1");
 }
