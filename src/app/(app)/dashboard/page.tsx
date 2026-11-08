@@ -7,6 +7,7 @@ import { fmtDate, fmtTime, isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
 import { fmtNps } from "@/lib/survey";
 import { CONTENT_STYLE, STAGE_STYLE } from "./styles";
+import { AutoSelect } from "@/components/auto-select";
 
 const TILES: Stage[] = ["needs_trainer", "waiting_trainer", "scheduled", "in_delivery", "report_due", "delivered", "cancelled"];
 
@@ -88,28 +89,28 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
       </div>
 
       <form className="flex flex-wrap items-center gap-2" action="/dashboard">
-        <select name="growth" defaultValue={growth} className="input w-44 py-1.5" aria-label="Growth lead">
+        <AutoSelect name="growth" defaultValue={growth} className="input w-44 py-1.5" aria-label="Growth lead">
           <option value="">All Growth leads</option>
           {[...requesters.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
-        <select name="trainer" defaultValue={trainer} className="input w-44 py-1.5" aria-label="Trainer">
+        </AutoSelect>
+        <AutoSelect name="trainer" defaultValue={trainer} className="input w-44 py-1.5" aria-label="Trainer">
           <option value="">All trainers</option>
           {[...trainerOptions.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
-        <select name="confirmation" defaultValue={confirmation} className="input w-48 py-1.5" aria-label="Trainer confirmation">
+        </AutoSelect>
+        <AutoSelect name="confirmation" defaultValue={confirmation} className="input w-48 py-1.5" aria-label="Trainer confirmation">
           <option value="">Any confirmation</option>
           {Object.entries(CONFIRMATION_FILTERS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select name="content" defaultValue={content} className="input w-40 py-1.5" aria-label="Content">
+        </AutoSelect>
+        <AutoSelect name="content" defaultValue={content} className="input w-40 py-1.5" aria-label="Content">
           <option value="">Any content</option>
           {Object.entries(CONTENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select name="stage" defaultValue={stage ?? ""} className="input w-44 py-1.5" aria-label="Training status">
+        </AutoSelect>
+        <AutoSelect name="stage" defaultValue={stage ?? ""} className="input w-44 py-1.5" aria-label="Training status">
           <option value="">Any training status</option>
           {TILES.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
-        </select>
-        <button className="btn-ghost btn-sm">Filter</button>
-        {(stage || growth || trainer || confirmation || content) && <Link href="/dashboard" className="text-sm text-blue hover:underline">Clear</Link>}
+        </AutoSelect>
+        <noscript><button className="btn-ghost btn-sm">Filter</button></noscript>
+        {(stage || growth || trainer || confirmation || content) && <Link href="/dashboard" className="text-sm text-blue hover:underline">Clear filters</Link>}
       </form>
 
       <section className="card overflow-x-auto p-0">
