@@ -1,114 +1,150 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { BuildingIcon, ChevronRightIcon } from "@/components/icons";
+import { AutoSelect } from "@/components/auto-select";
 import { requireAccess } from "@/lib/auth";
-import { fmtDate, todayISO } from "@/lib/format";
+import { buildTrainings, isContentFilter, type ContentState, type CycleDay, type CycleDeal, type Training } from "@/lib/cycle";
+import { fmtDate, fmtTime, isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
+import { CONTENT_STYLE } from "../dashboard/styles";
 
-type Deal = { id: string; company_name: string; content_guide: string | null; content_submitted_at: string | null; created_at: string };
-type Day = { deal_id: string; program_name: string; day_number: number; date: string };
-type Filter = "waiting" | "submitted" | "all";
+type State = Exclude<ContentState, "none">;
+const STATES: State[] = ["needs_content", "in_progress", "submitted"];
+const LABEL: Record<State, string> = { needs_content: "Not started", in_progress: "In progress", submitted: "Submitted" };
+const SOON_DAYS = 7;
 
-const FILTERS: [Filter, string][] = [
-  ["waiting", "Needs content"],
-  ["submitted", "Submitted"],
-  ["all", "All"],
-];
-
-// Every deal Growth sent, the ones still waiting for content first (soonest training on top).
+// Every deal Growth sent, laid out like the Training Excellence dashboard. Waiting ones first, soonest training on top.
 export default async function ContentPage({ searchParams }: PageProps<"/content">) {
   await requireAccess("content.view");
-  const { show } = await searchParams;
-  const filter: Filter = show === "submitted" || show === "all" ? show : "waiting";
-  const [deals, days, files] = await Promise.all([
-    fetchAll<Deal>((from, to) => db().from("deals").select("id, company_name, content_guide, content_submitted_at, created_at").order("created_at", { ascending: false }).range(from, to)),
-    fetchAll<Day>((from, to) => db().from("bookings").select("deal_id, program_name, day_number, date").not("deal_id", "is", null).neq("status", "cancelled").order("deal_id").order("day_number").range(from, to)),
+  const params = await searchParams;
+  const state = isContentFilter(params.state) ? params.state : null;
+  const soon = params.soon === "1";
+  const growth = isUuid(params.growth) ? params.growth : "";
+  const trainer = isUuid(params.trainer) ? params.trainer : "";
+
+  const [days, deals, files, users] = await Promise.all([
+    fetchAll<CycleDay>((from, to) => db().from("bookings").select("id, deal_id, batch_id, program_name, day_number, date, start_time, end_time, status, trainer_id, created_by, created_at, trainer_comment, trainer_responded_at, finished_at, brief_submitted_at, trainers(full_name), industry:lookups!bookings_industry_id_fkey(name)").not("deal_id", "is", null).order("id").range(from, to)),
+    fetchAll<CycleDeal>((from, to) => db().from("deals").select("id, company_name, content_guide, content_submitted_at, created_at").order("id").range(from, to)),
     fetchAll<{ deal_id: string }>((from, to) => db().from("deal_content").select("deal_id").order("id").range(from, to)),
+    fetchAll<{ id: string; full_name: string }>((from, to) => db().from("app_users").select("id, full_name").order("id").range(from, to)),
   ]);
-  const withFiles = new Set(files.data.map((f) => f.deal_id));
-  const byDeal = new Map<string, Day[]>();
-  for (const d of days.data) byDeal.set(d.deal_id, [...(byDeal.get(d.deal_id) ?? []), d]);
+  const failed = [days, deals, files, users].find((r) => r.error);
+  if (failed) {
+    console.error("[content]", failed.error);
+    return (
+      <div className="space-y-5">
+        <PageHeader kicker="Content" title={<>Content requests</>} />
+        <p className="rounded-xl bg-bad-bg px-4 py-3 text-sm text-bad">The content requests couldn&apos;t load. Please refresh and try again.</p>
+      </div>
+    );
+  }
+
   const today = todayISO();
-  const all = deals.data
-    .filter((d) => byDeal.has(d.id))
-    .map((d) => {
-      const ds = byDeal.get(d.id)!;
-      const state = d.content_submitted_at ? "submitted" : d.content_guide?.trim() || withFiles.has(d.id) ? "in_progress" : "not_started";
-      return { ...d, days: ds, first: ds[0], last: ds[ds.length - 1], state };
-    })
-    .sort((a, b) => Number(!!a.content_submitted_at) - Number(!!b.content_submitted_at) || a.first.date.localeCompare(b.first.date));
-  const waiting = all.filter((r) => !r.content_submitted_at);
-  const rows = filter === "waiting" ? waiting : filter === "submitted" ? all.filter((r) => r.content_submitted_at) : all;
-  const soon = waiting.filter((r) => r.first.date >= today && r.first.date <= addDays(today, 7)).length;
+  const soonEnd = addDays(today, SOON_DAYS);
+  const fileCount = new Map<string, number>();
+  for (const f of files.data) fileCount.set(f.deal_id, (fileCount.get(f.deal_id) ?? 0) + 1);
+
+  const trainings = buildTrainings({
+    days: days.data,
+    deals: deals.data,
+    contentFileDealIds: files.data.map((f) => f.deal_id),
+    feedback: [],
+    audioBookingIds: [],
+    names: new Map(users.data.map((u) => [u.id, u.full_name])),
+    today,
+  })
+    .filter((t) => t.content !== "none" && t.stage !== "cancelled")
+    .sort((a, b) => Number(a.content === "submitted") - Number(b.content === "submitted") || a.firstDate.localeCompare(b.firstDate));
+
+  const startsSoon = (t: Training) => t.content !== "submitted" && t.firstDate >= today && t.firstDate <= soonEnd;
+
+  const requesters = new Map<string, string>();
+  const trainerOptions = new Map<string, string>();
+  for (const t of trainings) {
+    if (t.requestedBy && t.requestedByName) requesters.set(t.requestedBy, t.requestedByName);
+    for (const x of t.trainers) trainerOptions.set(x.id, x.name);
+  }
+  const byName = (a: [string, string], b: [string, string]) => a[1].localeCompare(b[1]);
+
+  const scoped = trainings.filter((t) => (!growth || t.requestedBy === growth) && (!trainer || t.trainers.some((x) => x.id === trainer)));
+  const rows = scoped.filter((t) => (!state || t.content === state) && (!soon || startsSoon(t)));
+
+  const link = (p: Record<string, string>) => {
+    const q = new URLSearchParams({ ...(growth ? { growth } : {}), ...(trainer ? { trainer } : {}), ...p }).toString();
+    return q ? `/content?${q}` : "/content";
+  };
+  const active = (key: string) => (key === "all" ? !state && !soon : key === "soon" ? soon : state === key);
+  const tile = (key: string, label: string, n: number, href: string) => (
+    <Link key={key} href={href} className={`rounded-xl p-3 transition hover:brightness-95 ${key === "all" ? "stat-hot text-white" : "border border-ice2 bg-ice"} ${active(key) ? "ring-2 ring-royal ring-offset-2" : ""}`}>
+      <div className={`text-2xl font-bold tabular-nums ${key === "all" ? "" : key === "soon" && n ? "text-bad" : "text-royal-deep"}`}>{n}</div>
+      <div className={`text-[10.5px] font-medium uppercase tracking-wider ${key === "all" ? "text-[#93C5FD]" : "text-[#3B82F6]"}`}>{label}</div>
+    </Link>
+  );
 
   return (
     <div className="space-y-5">
-      <PageHeader kicker="Content" title={<>Content requests</>} lead={<>Every deal Growth sends lands here. Open one to read the brief, prepare the guide and files, then submit them to the trainer.</>} />
+      <PageHeader kicker="Content" title={<>Content requests</>} lead={<>Every deal Growth sends lands here. Open a training to read the brief, prepare the guide and files, then submit them to the trainer.</>} />
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {[
-          ["Needs content", waiting.length, "text-warn"],
-          ["Starting within 7 days", soon, soon ? "text-bad" : "text-ds-heading"],
-          ["Submitted", all.length - waiting.length, "text-good"],
-        ].map(([label, n, tone]) => (
-          <div key={label as string} className="ds-card px-5 py-4">
-            <div className={`text-2xl font-semibold tabular-nums ${tone}`}>{n}</div>
-            <div className="text-xs font-medium uppercase tracking-wider text-ds-text">{label}</div>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {tile("all", "All requests", scoped.length, link({}))}
+        {STATES.map((s) => tile(s, LABEL[s], scoped.filter((t) => t.content === s).length, link({ state: s })))}
+        {tile("soon", `Starts within ${SOON_DAYS} days`, scoped.filter(startsSoon).length, link({ soon: "1" }))}
       </div>
 
-      <nav className="flex flex-wrap gap-2" aria-label="Filter">
-        {FILTERS.map(([k, label]) => (
-          <Link key={k} href={k === "waiting" ? "/content" : `/content?show=${k}`} className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${filter === k ? "bg-ds-primary text-white" : "border border-ds-border bg-ds-surface text-ds-heading hover:border-ds-primary/50"}`}>
-            {label}
-          </Link>
-        ))}
-      </nav>
+      <form className="flex flex-wrap items-center gap-2" action="/content">
+        <AutoSelect name="growth" defaultValue={growth} className="input w-44 py-1.5" aria-label="Growth lead">
+          <option value="">All Growth leads</option>
+          {[...requesters.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </AutoSelect>
+        <AutoSelect name="trainer" defaultValue={trainer} className="input w-44 py-1.5" aria-label="Trainer">
+          <option value="">All trainers</option>
+          {[...trainerOptions.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </AutoSelect>
+        <AutoSelect name="state" defaultValue={state ?? ""} className="input w-44 py-1.5" aria-label="Content status">
+          <option value="">Any content status</option>
+          {STATES.map((s) => <option key={s} value={s}>{LABEL[s]}</option>)}
+        </AutoSelect>
+        {soon && <input type="hidden" name="soon" value="1" />}
+        <noscript><button className="btn-ghost btn-sm">Filter</button></noscript>
+        {(state || soon || growth || trainer) && <Link href="/content" className="text-sm text-blue hover:underline">Clear filters</Link>}
+      </form>
 
-      <section className="ds-card overflow-hidden">
-        {rows.length === 0 ? (
-          <p className="px-5 py-12 text-center text-sm text-ds-text">{filter === "waiting" ? "Nothing is waiting for content." : "No requests here yet."}</p>
-        ) : (
-          <ul className="divide-y divide-ds-border">
-            {rows.map((r) => {
-              const startsSoon = !r.content_submitted_at && r.first.date >= today && r.first.date <= addDays(today, 7);
-              return (
-                <li key={r.id}>
-                  <Link href={`/content/${r.id}`} className="flex flex-wrap items-center gap-4 px-5 py-4 transition hover:bg-ds-primary-soft/50">
-                    <span className="ds-icon-soft"><BuildingIcon size={18} /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold text-ds-heading">{r.first.program_name}</span>
-                      <span className="block truncate text-sm text-ds-text">{r.company_name || "Company not set"}</span>
-                    </span>
-                    <span className="w-44 text-sm">
-                      <span className="block text-ds-heading">
-                        {fmtDate(r.first.date, { day: "numeric", month: "short", year: "numeric" })}
-                        {r.days.length > 1 ? ` – ${fmtDate(r.last.date, { day: "numeric", month: "short" })}` : ""}
-                      </span>
-                      <span className={`block text-xs ${startsSoon ? "font-medium text-bad" : "text-ds-text"}`}>
-                        {r.days.length} {r.days.length === 1 ? "day" : "days"}
-                        {startsSoon ? " · starts soon" : ""}
-                      </span>
-                    </span>
-                    <span className="w-32">
-                      {r.state === "submitted" ? (
-                        <span className="badge bg-good-bg text-good">Submitted</span>
-                      ) : r.state === "in_progress" ? (
-                        <span className="badge bg-[#E2EBFE] text-royal">In progress</span>
-                      ) : (
-                        <span className="badge bg-warn-bg text-warn">Not started</span>
-                      )}
-                    </span>
-                    <ChevronRightIcon className="hidden text-ds-text sm:block" />
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+      <section className="card overflow-x-auto p-0">
+        <table className="table">
+          <thead>
+            <tr><th>Date</th><th>Company</th><th>Training</th><th>Industry</th><th>Growth lead</th><th>Trainer</th><th>Files</th><th>Content status</th><th>Submitted</th></tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={9} className="py-8 text-center text-muted">{!state && !soon ? "No content requests yet." : "Nothing here."}</td></tr>}
+            {rows.map((t) => <Row key={t.key} t={t} files={fileCount.get(t.days[0].deal_id ?? "") ?? 0} soon={startsSoon(t)} />)}
+          </tbody>
+        </table>
       </section>
     </div>
+  );
+}
+
+function Row({ t, files, soon }: { t: Training; files: number; soon: boolean }) {
+  const dayCount = t.live || t.days.length;
+  const state = t.content as State;
+  return (
+    <tr>
+      <td className="whitespace-nowrap">
+        {fmtDate(t.firstDate, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+        <div className="text-xs text-muted">{dayCount > 1 ? `Until ${fmtDate(t.lastDate, { day: "numeric", month: "short", year: "numeric" })}` : `${fmtTime(t.firstDay.start_time)} – ${fmtTime(t.firstDay.end_time)}`}</div>
+        {soon && <div className="mt-1"><span className="badge whitespace-nowrap bg-bad-bg text-bad">Starts soon</span></div>}
+      </td>
+      <td className="text-sm">{t.company ?? <span className="text-muted">—</span>}</td>
+      <td>
+        <Link href={`/content/${t.days[0].deal_id}`} className="font-medium text-blue hover:underline">{t.program}</Link>
+        <div className="text-xs text-muted">{dayCount} {dayCount === 1 ? "day" : "days"}</div>
+      </td>
+      <td className="text-xs text-muted">{t.industry ?? "—"}</td>
+      <td className="text-sm">{t.requestedByName ?? "—"}</td>
+      <td className="text-sm">{t.trainers.length ? t.trainers.map((x) => x.name).join(", ") : <span className="text-muted">Not assigned yet</span>}</td>
+      <td className="text-sm tabular-nums">{files || <span className="text-muted">—</span>}</td>
+      <td><span className={`badge whitespace-nowrap ${CONTENT_STYLE[state]}`}>{LABEL[state]}</span></td>
+      <td className="whitespace-nowrap text-sm">{t.contentSubmittedAt ? fmtDate(t.contentSubmittedAt.slice(0, 10), { day: "numeric", month: "short", year: "numeric" }) : <span className="text-muted">—</span>}</td>
+    </tr>
   );
 }
 
