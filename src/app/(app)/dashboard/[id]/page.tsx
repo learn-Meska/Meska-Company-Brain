@@ -4,6 +4,7 @@ import { ActionCard } from "@/components/action-card";
 import { AssignPanel } from "@/components/assign-panel";
 import { DownloadButton } from "@/components/booking-ui";
 import { DealCard } from "@/components/deal-card";
+import { DeleteTraining } from "@/components/delete-training";
 import { Form, Submit } from "@/components/form";
 import { SwapIcon, TrashIcon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
@@ -212,6 +213,8 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
       ) : (
         trainingActions && <div className="grid gap-3 lg:grid-cols-2">{trainingActions}</div>
       )}
+
+      {me.role === "admin" && me.real_role === "admin" && <DeleteTraining id={b.id} days={days.length} isDeal={!!b.deal_id} />}
     </div>
   );
 }
