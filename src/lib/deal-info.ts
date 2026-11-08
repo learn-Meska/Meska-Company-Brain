@@ -5,7 +5,7 @@ export type DealInfo = {
   company: string;
   participants: number;
   departments: [string, number][];
-  days: { id: string; day_number: number; date: string; start_time: string; end_time: string; location: string | null }[];
+  days: { id: string; day_number: number; date: string; start_time: string; end_time: string; location: string | null; trainer_id: string | null }[];
   // the guide and files the content team submitted for this deal; null until they submit
   content: { guide: string | null; submittedAt: string; files: { id: string; file_name: string; size_bytes: number | null }[] } | null;
 };
@@ -19,7 +19,7 @@ export async function getDealInfo(dealId: string | null): Promise<DealInfo | nul
     // read apart from the company so a database without the content columns yet still shows the rest of the ticket
     db().from("deals").select("content_guide, content_submitted_at").eq("id", dealId).maybeSingle(),
     db().from("deal_participants").select("department").eq("deal_id", dealId).range(0, 999),
-    db().from("bookings").select("id, day_number, date, start_time, end_time, location").eq("deal_id", dealId).neq("status", "cancelled").order("day_number"),
+    db().from("bookings").select("id, day_number, date, start_time, end_time, location, trainer_id").eq("deal_id", dealId).neq("status", "cancelled").order("day_number"),
     db().from("deal_content").select("id, file_name, size_bytes").eq("deal_id", dealId).order("created_at"),
   ]);
   if (!deal) return null;

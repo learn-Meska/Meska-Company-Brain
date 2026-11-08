@@ -8,7 +8,10 @@ export const NOTE: Record<string, string> = {
   confirmed: "bg-[#FFF3A3] border-[#F2DD6B]",
   awaiting_trainer: "bg-[#DCE8FF] border-[#A9C4F5]",
   pending_approval: "bg-[#FFE0CC] border-[#F5B48C]",
+  delivered: "bg-[#D5F5E1] border-[#86D3A8]",
 };
+// A day the trainer marked as delivered turns green, whatever its status.
+const noteFor = (b: BookingRow) => NOTE[b.finished_at ? "delivered" : b.status];
 
 export function monthGrid(m: unknown) {
   const month = isMonth(m) ? m : todayISO().slice(0, 7);
@@ -74,9 +77,9 @@ export function MonthCalendar({
       <div className="flex flex-wrap gap-4 text-xs text-muted">
         <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.confirmed}`} /> Confirmed</span>
         <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.awaiting_trainer}`} /> Pending: waiting for the trainer to confirm</span>
-        <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.needs_trainer}`} /> Needs a trainer</span>
+        {showTrainer && <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.needs_trainer}`} /> Needs a trainer</span>}
+        <span className="flex items-center gap-1.5"><i className={`h-3 w-3 rounded border ${NOTE.delivered}`} /> Training delivered</span>
         {available && <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded border border-[#86D3A8] bg-[#DDF5E7]" /> Trainer available (free slot)</span>}
-        <span>✎ = trainer brief received</span>
         <span>{total} {total === 1 ? "training" : "trainings"} this month</span>
       </div>
       <div className="overflow-x-auto pb-2">
@@ -104,11 +107,11 @@ export function MonthCalendar({
                     <Link
                       key={b.id}
                       href={href(b)}
-                      className={`block rounded-sm border px-1.5 py-1 text-center text-[10.5px] leading-tight shadow-[1px_2px_3px_rgba(0,0,0,.12)] transition hover:-translate-y-0.5 ${NOTE[b.status]}`}
+                      className={`block rounded-sm border px-1.5 py-1 text-center text-[10.5px] leading-tight shadow-[1px_2px_3px_rgba(0,0,0,.12)] transition hover:-translate-y-0.5 ${noteFor(b)}`}
                     >
                       <div className="font-semibold">
                         {title(b)}
-                        {b.brief_submitted_at && <span title="Trainer brief received"> ✎</span>}
+                        {b.finished_at && <span title="Training delivered"> ✓</span>}
                       </div>
                       {showTrainer && <div><b>Trainer:</b> {b.trainers?.full_name ?? <i>needs a trainer</i>}</div>}
                       <div><b>Time:</b> {fmtTime(b.start_time)} - {fmtTime(b.end_time)}</div>

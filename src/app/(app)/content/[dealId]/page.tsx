@@ -6,10 +6,22 @@ import { ContentEditor } from "@/components/content-editor";
 import { FileBadge } from "@/components/file-badge";
 import { BuildingIcon, CalendarIcon, CheckIcon, DownloadIcon, TagIcon, UsersIcon } from "@/components/icons";
 import { can, requireAccess } from "@/lib/auth";
+import { approvesContent } from "@/lib/team-access";
 import { fmtDate, fmtDateTime, fmtTime, isUuid } from "@/lib/format";
 import { db } from "@/lib/supabase";
 
-type Deal = { id: string; company_name: string; proposal_name: string; proposal_size: number | null; content_guide: string | null; content_submitted_at: string | null };
+type Deal = {
+  id: string;
+  company_name: string;
+  proposal_name: string;
+  proposal_size: number | null;
+  content_guide: string | null;
+  content_submitted_at: string | null;
+  content_review_guide: string | null;
+  content_review_requested_at: string | null;
+  content_review_note: string | null;
+  requester: { full_name: string } | null;
+};
 type Day = { id: string; program_name: string; day_number: number; date: string; start_time: string; end_time: string; location: string | null; industry: { name: string } | null };
 type Person = { name: string; title: string | null; department: string | null };
 type ContentFile = { id: string; file_name: string; size_bytes: number | null };
@@ -34,11 +46,12 @@ function Progress({ hasWork, submitted }: { hasWork: boolean; submitted: boolean
   const steps = [
     { label: "Read the brief", done: true },
     { label: "Prepare content", done: hasWork || submitted },
+    { label: "Approved by a content admin", done: submitted },
     { label: "Submitted to the trainer", done: submitted },
   ];
   const current = steps.findIndex((s) => !s.done);
   return (
-    <ol className="ds-card grid gap-3 p-4 sm:grid-cols-3 sm:gap-0 sm:p-0">
+    <ol className="ds-card grid gap-3 p-4 sm:grid-cols-4 sm:gap-0 sm:p-0">
       {steps.map((s, i) => {
         const active = i === current;
         return (
@@ -65,12 +78,12 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
   const { dealId } = await params;
   if (!isUuid(dealId)) notFound();
   const [{ data: deal }, { data: days }, { data: people }, { data: files }] = await Promise.all([
-    db().from("deals").select("id, company_name, proposal_name, proposal_size, content_guide, content_submitted_at").eq("id", dealId).maybeSingle(),
+    db().from("deals").select("id, company_name, proposal_name, proposal_size, content_guide, content_submitted_at, content_review_guide, content_review_requested_at, content_review_note, requester:app_users!deals_content_review_requested_by_fkey(full_name)").eq("id", dealId).maybeSingle(),
     db().from("bookings").select("id, program_name, day_number, date, start_time, end_time, location, industry:lookups!bookings_industry_id_fkey(name)").eq("deal_id", dealId).neq("status", "cancelled").order("day_number"),
     db().from("deal_participants").select("name, title, department").eq("deal_id", dealId).order("position").range(0, 999),
     db().from("deal_content").select("id, file_name, size_bytes").eq("deal_id", dealId).order("created_at"),
   ]);
-  const d = deal as Deal | null;
+  const d = deal as unknown as Deal | null;
   const dayRows = (days ?? []) as unknown as Day[];
   if (!d || !dayRows.length) notFound();
   const list = (people ?? []) as Person[];
@@ -86,6 +99,8 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
   const first = dayRows[0];
   const last = dayRows[dayRows.length - 1];
   const submitted = !!d.content_submitted_at;
+  const waiting = !!d.content_review_requested_at;
+  const returned = !waiting && !!d.content_review_note;
 
   return (
     <div className="space-y-5">
@@ -103,7 +118,11 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
               <BuildingIcon size={15} /> {d.company_name || "Company not set"}
             </p>
           </div>
-          {submitted ? (
+          {waiting ? (
+            <span className="badge bg-[#E2EBFE] text-royal">Awaiting approval</span>
+          ) : returned ? (
+            <span className="badge bg-warn-bg text-warn">Changes requested</span>
+          ) : submitted ? (
             <span className="badge bg-good-bg text-good">Submitted {fmtDateTime(d.content_submitted_at!)}</span>
           ) : (
             <span className="badge bg-warn-bg text-warn">Needs content</span>
@@ -126,7 +145,16 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
       <Progress hasWork={!!d.content_guide?.trim() || fileRows.length > 0} submitted={submitted} />
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-        <ContentEditor dealId={d.id} initialGuide={d.content_guide ?? ""} submittedAt={d.content_submitted_at} files={fileRows} canWrite={can(me, "content.write")} canSubmit={can(me, "content.submit")} />
+        <ContentEditor
+          dealId={d.id}
+          initialGuide={(d.content_review_guide ?? d.content_guide) ?? ""}
+          submittedAt={d.content_submitted_at}
+          files={fileRows}
+          canWrite={can(me, "content.write")}
+          canSubmit={can(me, "content.submit")}
+          approver={approvesContent(me)}
+          review={{ pendingBy: d.requester?.full_name ?? null, pendingAt: waiting ? fmtDateTime(d.content_review_requested_at!) : null, note: d.content_review_note }}
+        />
 
         <aside className="space-y-5 lg:sticky lg:top-20">
           <Panel icon={<TagIcon size={16} />} title="Proposal">

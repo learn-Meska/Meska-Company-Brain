@@ -27,7 +27,7 @@ export default async function FeedbackPage({ params }: PageProps<"/f/[token]">) 
     : { data: null };
   const b = data as unknown as { id: string; status: string; date: string; start_time: string; end_time: string; day_number: number; trainers: { full_name: string } | null } | null;
   const alwaysOpen = await feedbackAlwaysOpen();
-  const valid = !!b && takesFeedback(b.status, alwaysOpen);
+  const valid = !!b && takesFeedback(b.status);
 
   let body: ReactNode;
   if (!b || !valid) body = <Notice title="This link isn't valid" text="Ask your trainer for the QR code of today's session." />;
