@@ -8,7 +8,7 @@ export function DeleteTrainer({ action, id, name }: { action: (fd: FormData) => 
       <input type="hidden" name="id" value={id} />
       <button
         type="submit"
-        className="btn-ghost text-bad"
+        className="btn-quiet text-bad"
         onClick={(e) => {
           if (!window.confirm(`Delete ${name}'s profile? This can't be undone.`)) e.preventDefault();
         }}

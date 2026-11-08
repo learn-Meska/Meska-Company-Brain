@@ -8,6 +8,7 @@
   --ice: #eff6ff;
   --ice2: #dbeafe;
   --blue: #2563eb;
+  --neon: #1f6bff;
   --bg: #f5f7fc;
   --surface: #ffffff;
   --surface2: #eff6ff;
@@ -30,6 +31,7 @@
   --color-ice: var(--ice);
   --color-ice2: var(--ice2);
   --color-blue: var(--blue);
+  --color-neon: var(--neon);
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface2: var(--surface2);
@@ -69,7 +71,12 @@ body {
   .h1 { @apply text-2xl font-bold tracking-tight text-ink; }
   .h2 { @apply text-lg font-semibold text-ink; }
   .btn { @apply inline-flex items-center justify-center gap-2 rounded-full bg-blue px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50; }
-  .btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-full bg-surface2 px-4 py-2 text-sm font-medium text-ink transition hover:bg-line disabled:opacity-50; }
+  /* Neon take on Meska Blue. White text on it passes AA (4.5:1), so hover adds glow instead of lightening. */
+  .btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-full bg-neon px-4 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50; box-shadow: 0 0 12px rgb(31 107 255 / 0.45); }
+  .btn-ghost:hover:not(:disabled) { box-shadow: 0 0 20px rgb(31 107 255 / 0.75); }
+  .btn-ghost:disabled { box-shadow: none; }
+  /* Pale button for unselected filter tabs and red-text destructive actions, which need to stay quiet. */
+  .btn-quiet { @apply inline-flex items-center justify-center gap-2 rounded-full bg-surface2 px-4 py-2 text-sm font-medium text-ink transition hover:bg-line disabled:opacity-50; }
   .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-full bg-bad px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-50; }
   .btn-sm { @apply px-3 py-1 text-xs; }
   .label { @apply mb-1 block text-xs font-medium text-muted; }

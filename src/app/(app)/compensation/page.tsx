@@ -71,7 +71,7 @@ export default async function CompensationPage({ searchParams }: PageProps<"/com
           <Form action={deleteCompensation} className="mt-3 border-t border-line pt-3">
             <input type="hidden" name="id" value={editing.id} />
             <input type="hidden" name="filter" value={trainer} />
-            <Submit className="btn-ghost btn-sm text-bad" pending="Deleting…">Delete this line</Submit>
+            <Submit className="btn-quiet btn-sm text-bad" pending="Deleting…">Delete this line</Submit>
           </Form>
         </section>
       ) : (

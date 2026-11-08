@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ActionCard } from "@/components/action-card";
 import { AssignPanel } from "@/components/assign-panel";
 import { DownloadButton } from "@/components/booking-ui";
 import { DealCard } from "@/components/deal-card";
 import { Form, Submit } from "@/components/form";
+import { SwapIcon, TrashIcon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status";
 import { requireRole } from "@/lib/auth";
@@ -76,6 +78,36 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
     ["Trainer confirmation", t.confirmation],
     ["Feedback score", t.responses ? `${fmtNps(t.score)} · ${t.responses} ${t.responses === 1 ? "response" : "responses"}` : "—"],
   ];
+
+  // Reassign and cancel act on every remaining day; on a New deal they sit at the bottom of the deal card.
+  const trainingActions =
+    reassignable.length > 0 || cancellable.length > 0 ? (
+      <>
+        {reassignable.length > 0 && (
+          <ActionCard icon={<SwapIcon />} title="Reassign trainer" lead="Give this training to a different trainer.">
+            <p className="text-xs text-muted">
+              Removes the trainer from {reassignable.length === 1 ? "the upcoming day" : `the ${reassignable.length} upcoming days`} and tells them and the team. The training goes back to “Needs a trainer” so you can choose someone else above. Days already delivered stay as they are.
+            </p>
+            <Form action={reassignTraining}>
+              <input type="hidden" name="id" value={b.id} />
+              <Submit className="btn-ghost" pending="Removing…">Remove trainer and reassign</Submit>
+            </Form>
+          </ActionCard>
+        )}
+        {cancellable.length > 0 && (
+          <ActionCard icon={<TrashIcon />} title="Cancel training" lead="Cancel what is left of this training." tone="danger">
+            <p className="text-xs text-muted">
+              Cancels {cancellable.length === 1 ? "the remaining day" : `the ${cancellable.length} remaining days`}. The trainer is told, and the team gets the reason. Within {rule.notice_hours} hours of the start, or after a date has passed, at least {rule.min_reason_chars} characters are required.
+            </p>
+            <Form action={cancelTraining} className="space-y-2">
+              <input type="hidden" name="id" value={b.id} />
+              <textarea name="reason" rows={4} required className="input" placeholder="Why is this training being cancelled?" />
+              <Submit className="btn-danger" pending="Cancelling…">Cancel this training</Submit>
+            </Form>
+          </ActionCard>
+        )}
+      </>
+    ) : null;
 
   return (
     <div className="space-y-5">
@@ -175,36 +207,10 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
         )}
       </section>
 
-      {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} />}
-
-      {(reassignable.length > 0 || cancellable.length > 0) && (
-        <div className="grid gap-5 lg:grid-cols-2">
-          {reassignable.length > 0 && (
-            <section className="card">
-              <h2 className="h2 mb-1">Reassign trainer</h2>
-              <p className="mb-3 text-xs text-muted">
-                Removes the trainer from {reassignable.length === 1 ? "the upcoming day" : `the ${reassignable.length} upcoming days`} and tells them. The training goes back to “Needs a trainer” so you can choose someone else above. Days already delivered stay as they are.
-              </p>
-              <Form action={reassignTraining}>
-                <input type="hidden" name="id" value={b.id} />
-                <Submit className="btn-ghost" pending="Removing…">Remove trainer and reassign</Submit>
-              </Form>
-            </section>
-          )}
-          {cancellable.length > 0 && (
-            <section className="card">
-              <h2 className="h2 mb-1 text-bad">Cancel training</h2>
-              <p className="mb-3 text-xs text-muted">
-                Cancels {cancellable.length === 1 ? "the remaining day" : `the ${cancellable.length} remaining days`} and tells the trainer. The reason goes only to the admin log. Within {rule.notice_hours} hours of the start, or after a date has passed, at least {rule.min_reason_chars} characters are required.
-              </p>
-              <Form action={cancelTraining} className="space-y-2">
-                <input type="hidden" name="id" value={b.id} />
-                <textarea name="reason" rows={4} required className="input" placeholder="Why is this training being cancelled?" />
-                <Submit className="btn-danger" pending="Cancelling…">Cancel this training</Submit>
-              </Form>
-            </section>
-          )}
-        </div>
+      {b.deal_id ? (
+        <DealCard dealId={b.deal_id} bookingId={b.id} actions={trainingActions} />
+      ) : (
+        trainingActions && <div className="grid gap-3 lg:grid-cols-2">{trainingActions}</div>
       )}
     </div>
   );

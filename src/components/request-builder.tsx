@@ -7,6 +7,7 @@ import { Dropzone } from "@/components/dropzone";
 import { createProposalUpload, createRequest, requestTrainerOptions } from "@/app/(app)/bookings/actions";
 import {
   dealTotal,
+  dealDaysError,
   dealValueError,
   fmtAmount,
   parseAmount,
@@ -61,6 +62,8 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
   const valueError = valuePerDay || dealDays ? dealValueError(perDay, nDays) : null;
   const [same, setSame] = useState(false);
   const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", trainerId: "" }]);
+  // Shown once the proposal's day count is valid, while the days added in step 4 differ from it.
+  const daysError = !valueError && dealDays ? dealDaysError(nDays, days.length) : null;
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
   // trainers free at each day's time (availability is the only filter for now)
@@ -123,6 +126,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
     setErr("");
     if (!people?.list.length) return setErr("Upload the participants file (step 2).");
     if (!proposal) return setErr("Upload the proposal (step 3).");
+    if (daysError) return setErr(daysError);
     start(async () => {
       const r = await createRequest({
         ...f,
@@ -267,6 +271,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           </div>
           <button type="button" onClick={addDay} className="btn-ghost">+ Add another day</button>
         </div>
+        {daysError && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{daysError}</p>}
         {days.map((d, i) => (
           <div key={d.key} className="rounded-2xl border border-line p-4">
             <div className="mb-3 flex items-center justify-between">

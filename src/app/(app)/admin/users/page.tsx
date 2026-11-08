@@ -51,9 +51,6 @@ export default async function UsersPage() {
               <RoleBoxes checked={["approver"]} />
             </div>
           </fieldset>
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input type="checkbox" name="can_manage_trainers" /> Can manage trainer profiles, scores and invitations
-          </label>
           <Submit pending="Sending invite…">Add &amp; send invite</Submit>
         </Form>
       </section>
@@ -78,9 +75,6 @@ export default async function UsersPage() {
                   <Form action={updateTeamMember} className="flex flex-wrap items-center gap-2">
                     <input type="hidden" name="id" value={u.id} />
                     <RoleBoxes checked={u.roles ?? [u.role]} />
-                    <label className="flex items-center gap-1.5 text-xs">
-                      <input type="checkbox" name="can_manage_trainers" defaultChecked={u.can_manage_trainers} /> Manages trainers
-                    </label>
                     <Submit className="btn-ghost btn-sm">Save</Submit>
                   </Form>
                 </td>
@@ -92,7 +86,7 @@ export default async function UsersPage() {
                   {u.id !== me.id && (
                     <Form action={removeTeamMember} className="inline">
                       <input type="hidden" name="id" value={u.id} />
-                      <Submit className="btn-ghost btn-sm text-bad" pending="Removing…">Remove</Submit>
+                      <Submit className="btn-quiet btn-sm text-bad" pending="Removing…">Remove</Submit>
                     </Form>
                   )}
                 </td>

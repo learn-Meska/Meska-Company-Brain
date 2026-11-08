@@ -210,8 +210,6 @@ const STAFF_ROLES = ["admin", "approver", "growth", "content"] as const;
 const ROLE_TEXT: Record<string, string> = { admin: "Admin", approver: "Training Excellence", growth: "Growth", content: "Content" };
 const pickRoles = (fd: FormData) => STAFF_ROLES.filter((r) => fd.getAll("roles").map(String).includes(r));
 const rolesText = (roles: string[]) => roles.map((r) => ROLE_TEXT[r] ?? r).join(" + ");
-// Trainer management only takes effect in a booking-manager view (Growth views ignore it), so only store it there.
-const managesTrainers = (fd: FormData, roles: string[]) => fd.get("can_manage_trainers") === "on" && roles.includes("approver");
 
 // One email can hold several roles (e.g. Booking manager + Growth); the highest becomes the main one.
 export async function addTeamMember(fd: FormData) {
@@ -234,7 +232,7 @@ export async function addTeamMember(fd: FormData) {
     const all = [...new Set([...held, ...roles])];
     const { error } = await db()
       .from("app_users")
-      .upsert({ id, email, full_name, role: mainRole(all), roles: all, can_manage_trainers: managesTrainers(fd, all) });
+      .upsert({ id, email, full_name, role: mainRole(all), roles: all });
     if (error) return failed("addTeamMember", error);
     await audit(me.id, "team_member_added", null, { email, roles });
     await sendInvite(email, full_name, rolesText(roles));
@@ -257,7 +255,7 @@ export async function updateTeamMember(fd: FormData) {
   // Keep the trainer role if they have one; only the staff roles are edited here.
   const keep = ((cur as { roles: string[] | null }).roles ?? []).filter((r) => !(STAFF_ROLES as readonly string[]).includes(r));
   const all = [...new Set([...roles, ...keep])];
-  const { error } = await db().from("app_users").update({ role: mainRole(all), roles: all, can_manage_trainers: managesTrainers(fd, all) }).eq("id", id);
+  const { error } = await db().from("app_users").update({ role: mainRole(all), roles: all }).eq("id", id);
   if (error) return failed("updateTeamMember", error);
   return done("/admin/users", "Access saved.");
 }

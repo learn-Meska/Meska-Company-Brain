@@ -17,8 +17,8 @@ export default async function LogsPage({ searchParams }: PageProps<"/admin/logs"
   return (
     <div className="space-y-6">
       <PageHeader kicker="Audit" title={<>Activity log</>} lead={<>Every booking action, including cancellation reasons.</>} actions={<>
-          <Link href="/admin/logs" className={only ? "btn-ghost" : "btn"}>Everything</Link>
-          <Link href="/admin/logs?only=cancellations" className={only ? "btn" : "btn-ghost"}>Cancellations</Link>
+          <Link href="/admin/logs" className={only ? "btn-quiet" : "btn"}>Everything</Link>
+          <Link href="/admin/logs?only=cancellations" className={only ? "btn" : "btn-quiet"}>Cancellations</Link>
           <a href={`/admin/logs/export${only ? "?only=cancellations" : ""}`} className="btn-ghost">⬇ Download (Excel / CSV)</a>
         </>} />
       <section className="card overflow-x-auto p-0">

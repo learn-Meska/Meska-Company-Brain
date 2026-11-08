@@ -178,6 +178,19 @@ describe("requestError: the whole New deal, step by step", () => {
   ])("refuses a missing or bad %s", (_, over, msg) => {
     expect(requestError(validRequest(over), growth)).toMatch(msg);
   });
+  it("the days added must equal the days the proposal covers", () => {
+    const day = validRequest().days[0];
+    const three = [day, { ...day, day_number: 2 }, { ...day, day_number: 3 }];
+    expect(requestError(validRequest({ deal_days: 3, days: three }), growth)).toBeNull();
+    expect(requestError(validRequest({ deal_days: 3, days: three.slice(0, 1) }), growth)).toBe(
+      "The number of days chosen (1 day) does not match the proposal (3 days). Add 2 days so they match.",
+    );
+    expect(requestError(validRequest({ deal_days: 2, days: three }), growth)).toBe(
+      "The number of days chosen (3 days) does not match the proposal (2 days). Remove 1 day so they match.",
+    );
+    // a bad day count in step 3 is reported as that, not as a mismatch
+    expect(requestError(validRequest({ deal_days: 0, days: three }), growth)).toMatch(/how many days/);
+  });
   it("checks the steps in the order the form shows them", () => {
     const allBad = validRequest({ company_name: "", program_name: "", industry_id: "", participants: [], value_per_day: 0, days: [] });
     expect(requestError(allBad, growth)).toBe("Enter the company name.");

@@ -76,6 +76,7 @@ describe("New deal: happy path", () => {
         { day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: " Cairo ", trainer_id: TRAINER },
         { day_number: 2, date: "2026-11-11", start: "18:00", end: "22:00", location: "", trainer_id: TRAINER },
       ],
+      deal_days: 2,
       same_trainer: true,
     });
     const r = await createRequest(input);
@@ -105,10 +106,10 @@ describe("New deal: happy path", () => {
     expect(trainerRows).toEqual(["Program", "Date", "Time", "Location", "Industry", "Status"]);
     const teamRows = Object.fromEntries(h.notified[2].email!.rows!);
     expect(teamRows["Participants"]).toBe("2");
-    expect(teamRows["Deal value"]).toBe("100,000 per day × 5 days = <b>500,000</b>");
+    expect(teamRows["Deal value"]).toBe("100,000 per day × 2 days = <b>200,000</b>");
     expect(teamRows["Proposal"]).toBe("Proposal.pdf");
     expect(h.audits.map((a) => a.action)).toEqual(["training_requested", "training_requested"]);
-    expect(h.audits[0].details).toMatchObject({ deal: fakeId(1), value_per_day: 100000, days: 5, participants: 2 });
+    expect(h.audits[0].details).toMatchObject({ deal: fakeId(1), value_per_day: 100000, days: 2, participants: 2 });
   });
 
   it("booking manager: a day without a trainer goes on the calendar as needs_trainer", async () => {
@@ -124,6 +125,12 @@ describe("New deal: refusals leave nothing behind", () => {
   it("trainers can't create deals", async () => {
     h.me = { id: USER, role: "trainer", full_name: "T" };
     await expect(createRequest(await uploadedRequest())).rejects.toThrow(/REDIRECT/);
+    expect(h.fake.writes).toEqual([]);
+  });
+
+  it("days that don't match the proposal are refused before any write", async () => {
+    const r = await createRequest(await uploadedRequest({ deal_days: 3 }));
+    expect(r.error).toBe("The number of days chosen (1 day) does not match the proposal (3 days). Add 2 days so they match.");
     expect(h.fake.writes).toEqual([]);
   });
 

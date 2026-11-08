@@ -114,7 +114,7 @@ export default async function SettingsPage() {
                   </Form>
                   <Form action={deleteCategory}>
                     <input type="hidden" name="id" value={c.id} />
-                    <button className="btn-ghost text-bad">Delete</button>
+                    <button className="btn-quiet text-bad">Delete</button>
                   </Form>
                 </div>
               ))}
