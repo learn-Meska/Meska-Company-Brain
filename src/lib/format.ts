@@ -90,6 +90,7 @@ export const AUDIT_LABEL: Record<string, string> = {
   trainer_deleted: "Trainer profile deleted",
   team_member_added: "Team member added",
   team_member_removed: "Team member removed",
+  feedback_settings_changed: "Feedback form changed",
   access_invited: "Access sent for confirmation",
   access_accepted: "Access confirmed",
   training_deleted: "Training deleted",

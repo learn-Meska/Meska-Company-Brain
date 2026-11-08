@@ -20,6 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (u.role === "growth") items.push({ href: "/bookings", label: has("growth.all_bookings") ? "All bookings" : "My bookings" });
     if (has("growth.trainers") || has("te.trainers") || has("te.find") || has("te.assign")) items.push({ href: "/trainers", label: "Trainers" });
     if (has("content.view")) items.push({ href: "/content", label: "Content requests" });
+    if (canEditSettings(u)) items.push({ href: "/admin/feedback-form", label: "Feedback form" });
     if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
     else if (canEditSettings(u)) items.push({ href: "/admin/settings", label: "Scoring & lists" });
   }

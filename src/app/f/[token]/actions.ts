@@ -3,8 +3,9 @@
 import { cookies } from "next/headers";
 import { db } from "@/lib/supabase";
 import { feedbackWindow, isUuid } from "@/lib/format";
+import { feedbackAlwaysOpen, getFeedbackForm, takesFeedback } from "@/lib/feedback-mode";
+import { readAnswers } from "@/lib/feedback-form";
 import { getCurrentUser } from "@/lib/auth";
-import { YES_NO_QUESTIONS } from "@/lib/survey";
 
 // A training room rarely holds more than this; anything beyond it is treated as abuse.
 const MAX_RESPONSES = 150;
@@ -15,21 +16,22 @@ export async function submitParticipantFeedback(token: string, fd: FormData) {
   if (!isUuid(token)) return { error: "This feedback link is not valid." };
   const { data } = await db().from("bookings").select("id, status, date, start_time, end_time, trainers(user_id)").eq("feedback_token", token).maybeSingle();
   const b = data as unknown as { id: string; status: string; date: string; start_time: string; end_time: string; trainers: { user_id: string | null } | null } | null;
-  if (!b || b.status !== "confirmed") return { error: "This feedback link is not valid." };
+  const alwaysOpen = await feedbackAlwaysOpen();
+  if (!b || !takesFeedback(b.status, alwaysOpen)) return { error: "This feedback link is not valid." };
   // The trainer can't rate their own session.
   const me = await getCurrentUser();
   if (me && b.trainers?.user_id && me.id === b.trainers.user_id) return { error: "Trainers can't submit feedback for their own session." };
   const { opens, closes } = feedbackWindow(b);
   const now = Date.now();
-  if (now < opens.getTime()) return { error: "Feedback opens when the training starts." };
-  if (now > closes.getTime()) return { error: "Feedback for this training has closed." };
+  if (!alwaysOpen && now < opens.getTime()) return { error: "Feedback opens when the training starts." };
+  if (!alwaysOpen && now > closes.getTime()) return { error: "Feedback for this training has closed." };
   const jar = await cookies();
   if (jar.get(`fb_${b.id}`)) return { error: "You've already sent feedback for this session. Thank you!" };
-  const raw = String(fd.get("recommend") ?? "");
-  const recommend = Number(raw);
-  if (raw === "" || !Number.isInteger(recommend) || recommend < 0 || recommend > 10) return { error: "Please pick a score from 0 to 10." };
-  const yesNo = Object.fromEntries(YES_NO_QUESTIONS.map((q) => [q.key, fd.get(q.key) === "yes" ? true : fd.get(q.key) === "no" ? false : null]));
-  if (Object.values(yesNo).some((v) => v == null)) return { error: "Please answer Yes or No to every question." };
+  const read = readAnswers(await getFeedbackForm(), (name) => {
+    const v = fd.get(name);
+    return typeof v === "string" ? v : null;
+  });
+  if ("error" in read) return { error: read.error };
   // The cookie only stops honest repeats, so also cap volume: a burst limit and a ceiling per session.
   const [{ count: total }, { count: recent }] = await Promise.all([
     db().from("feedback_responses").select("id", { count: "exact", head: true }).eq("booking_id", b.id),
@@ -37,8 +39,7 @@ export async function submitParticipantFeedback(token: string, fd: FormData) {
   ]);
   if ((total ?? 0) >= MAX_RESPONSES) return { error: "This session has reached the maximum number of responses. Thank you!" };
   if ((recent ?? 0) >= MAX_PER_MINUTE) return { error: "Lots of people are sending feedback right now. Please try again in a minute." };
-  const reason = String(fd.get("reason") ?? "").replace(/\r\n/g, "\n").trim().slice(0, 2000) || null;
-  const { error } = await db().from("feedback_responses").insert({ booking_id: b.id, recommend, reason, ...yesNo });
+  const { error } = await db().from("feedback_responses").insert({ booking_id: b.id, recommend: read.recommend, reason: read.reason, ...read.legacy, answers: read.answers });
   if (error) return { error: "Something went wrong. Please try again." };
   jar.set(`fb_${b.id}`, "1", { maxAge: 60 * 60 * 24 * 7, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
   return { ok: "Thank you! Your feedback was sent." };

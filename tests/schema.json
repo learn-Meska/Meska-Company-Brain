@@ -38,7 +38,8 @@
     "contact_name",
     "contact_email",
     "contact_mobile",
-    "deal_id"
+    "deal_id",
+    "delivery_report"
   ],
   "deals": [
     "id",
@@ -105,6 +106,14 @@
     "created_by",
     "created_at",
     "accepted_at"
+  ],
+  "feedback_responses": [
+    "id",
+    "booking_id",
+    "recommend",
+    "reason",
+    "answers",
+    "created_at"
   ],
   "buckets": [
     "proposals"

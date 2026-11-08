@@ -105,6 +105,7 @@ export type BookingRow = {
   cancel_reason: string | null;
   brief: string | null;
   brief_submitted_at: string | null;
+  delivery_report?: unknown;
   feedback_token: string;
   finished_at: string | null;
   feedback_summary_sent_at: string | null;
