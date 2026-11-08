@@ -95,6 +95,17 @@
     "team_admin_of",
     "permissions"
   ],
+  "access_invites": [
+    "id",
+    "user_id",
+    "category",
+    "portal_admin",
+    "permissions",
+    "token",
+    "created_by",
+    "created_at",
+    "accepted_at"
+  ],
   "buckets": [
     "proposals"
   ]

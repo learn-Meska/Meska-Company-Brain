@@ -153,3 +153,16 @@ export function dropCategory(cur: Partial<Access>, category: Category): Access {
   const roles = (cur.roles ?? []).filter((r) => r !== category);
   return { roles, team_admin_of: cleanTeamAdmin(roles, cur.team_admin_of ?? []), permissions: cleanPermissions(roles, cur.permissions ?? []) };
 }
+
+// An emailed access invite works once, for 7 days, and only for the person it was sent to.
+export const INVITE_DAYS = 7;
+export function inviteProblem(invite: { user_id: string; created_at: string; accepted_at: string | null } | null, userId: string, now = Date.now()) {
+  if (!invite) return "This link isn't valid. Ask your admin to send it again.";
+  if (invite.accepted_at) return "This access was already confirmed.";
+  if (now - new Date(invite.created_at).getTime() > INVITE_DAYS * 86400000) return "This link has expired. Ask your admin to send it again.";
+  if (invite.user_id !== userId) return "This link is for another account. Sign out and sign in with the email it was sent to.";
+  return null;
+}
+
+// Invites sent after this moment are still valid.
+export const inviteCutoff = (now = Date.now()) => new Date(now - INVITE_DAYS * 86400000).toISOString();

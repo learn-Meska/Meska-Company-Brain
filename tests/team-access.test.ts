@@ -133,3 +133,16 @@ describe("portal team management", () => {
     });
   });
 });
+
+describe("access invites", () => {
+  const sent = { user_id: "u1", created_at: "2026-11-01T10:00:00Z", accepted_at: null };
+  const now = new Date("2026-11-03T10:00:00Z").getTime();
+  it("works once, for 7 days, only for the person it was sent to", async () => {
+    const { inviteProblem } = await import("../src/lib/team-access");
+    expect(inviteProblem(sent, "u1", now)).toBeNull();
+    expect(inviteProblem(null, "u1", now)).toMatch(/isn't valid/);
+    expect(inviteProblem({ ...sent, accepted_at: "2026-11-02T10:00:00Z" }, "u1", now)).toMatch(/already confirmed/);
+    expect(inviteProblem(sent, "u1", new Date("2026-11-09T10:00:01Z").getTime())).toMatch(/expired/);
+    expect(inviteProblem(sent, "someone-else", now)).toMatch(/another account/);
+  });
+});
