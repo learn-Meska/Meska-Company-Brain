@@ -21,8 +21,8 @@ function FileBadge({ name }: { name: string }) {
   const [label, tone] =
     ext === "pdf" ? ["PDF", "text-ds-danger"] : ext === "doc" || ext === "docx" ? ["DOC", "text-ds-primary"] : ext === "ppt" || ext === "pptx" ? ["PPT", "text-[#C2410C]"] : [ext.slice(0, 4).toUpperCase() || "FILE", "text-ds-text"];
   return (
-    <span className="relative grid h-12 w-10 flex-none place-items-end rounded-md border border-ds-border bg-ds-subtle pb-1.5">
-      <span aria-hidden className="absolute right-0 top-0 h-3 w-3 rounded-bl-[4px] border-b border-l border-ds-border bg-ds-surface" />
+    <span className="relative grid h-12 w-10 flex-none place-items-end rounded-md border border-ds-primary/15 bg-ds-primary-soft pb-1.5">
+      <span aria-hidden className="absolute right-0 top-0 h-3 w-3 rounded-bl-[4px] border-b border-l border-ds-primary/15 bg-ds-surface" />
       <span className={`w-full text-center text-[10px] font-bold tracking-wide ${tone}`}>{label}</span>
     </span>
   );
@@ -31,7 +31,7 @@ function FileBadge({ name }: { name: string }) {
 function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center gap-4 rounded-xl border border-ds-border bg-ds-surface p-4 sm:p-5">
-      <span className="ds-icon">{icon}</span>
+      <span className="ds-icon-solid">{icon}</span>
       <div className="min-w-0">
         <dt className="text-sm text-ds-text">{label}</dt>
         <dd className="mt-0.5 whitespace-nowrap text-2xl font-semibold tabular-nums tracking-tight text-ds-heading">{value}</dd>
@@ -60,7 +60,8 @@ export async function DealCard({ dealId, bookingId, actions }: { dealId: string;
 
   return (
     <div className="@container space-y-6">
-      <section className="ds-card space-y-6 p-5 sm:p-6">
+      <section className="ds-card relative space-y-6 overflow-hidden p-5 sm:p-6">
+        <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-ds-primary" />
         <header>
           <span className="inline-flex items-center gap-1.5 rounded-md bg-ds-primary/[0.08] px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-ds-primary">
             <TagIcon size={13} /> New deal
@@ -89,7 +90,7 @@ export async function DealCard({ dealId, bookingId, actions }: { dealId: string;
       <section className="ds-card overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
           <h3 className="flex items-center gap-3 text-base font-semibold text-ds-heading">
-            <span className="ds-icon h-9 w-9"><UsersIcon size={18} /></span>
+            <span className="ds-icon-soft h-9 w-9"><UsersIcon size={18} /></span>
             Participants ({list.length})
           </h3>
           {list.length > 0 && (
@@ -103,22 +104,22 @@ export async function DealCard({ dealId, bookingId, actions }: { dealId: string;
         ) : (
           // A table on wide cards; on narrow ones each participant stacks into a block, so nothing scrolls sideways.
           <div role="table" aria-label="Participants" className="max-h-[32rem] overflow-y-auto border-t border-ds-border">
-            <div role="row" className="sticky top-0 z-10 hidden grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.3fr)] gap-4 border-b border-ds-border bg-ds-subtle px-6 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-ds-text @2xl:grid">
+            <div role="row" className="sticky top-0 z-10 hidden grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.3fr)] gap-4 border-b border-ds-primary/10 bg-ds-primary-soft px-6 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-ds-primary @2xl:grid">
               <span role="columnheader">Participant</span>
               <span role="columnheader">Department</span>
               <span role="columnheader">Details</span>
             </div>
             {list.map((p, i) => (
-              <div role="row" key={i} className="grid gap-3 border-b border-ds-border px-5 py-4 last:border-b-0 sm:px-6 @2xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.3fr)] @2xl:items-center @2xl:gap-4">
+              <div role="row" key={i} className="grid gap-3 border-b border-ds-border px-5 py-4 transition last:border-b-0 hover:bg-ds-primary-soft/40 sm:px-6 @2xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.3fr)] @2xl:items-center @2xl:gap-4">
                 <div role="cell" className="flex min-w-0 items-center gap-3">
-                  <span className="grid h-9 w-9 flex-none place-items-center rounded-full border border-ds-border bg-ds-subtle text-xs font-semibold text-ds-heading">{initials(p.name)}</span>
+                  <span className="grid h-9 w-9 flex-none place-items-center rounded-full bg-ds-primary-soft text-xs font-semibold text-ds-primary">{initials(p.name)}</span>
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-ds-heading">{p.name}</div>
                     <div className="truncate text-xs text-ds-text">{p.title || "No title"}</div>
                   </div>
                 </div>
                 <div role="cell" className="pl-12 @2xl:pl-0">
-                  {p.department ? <span className="ds-badge">{p.department}</span> : <span className="text-sm text-ds-text">—</span>}
+                  {p.department ? <span className="ds-chip">{p.department}</span> : <span className="text-sm text-ds-text">—</span>}
                 </div>
                 <div role="cell" className="space-y-1 pl-12 text-xs text-ds-text @2xl:pl-0">
                   <div className="flex items-center gap-2"><CalendarIcon size={14} className="flex-none text-ds-text" /> Training · {dayCount} {dayCount === 1 ? "day" : "days"}</div>

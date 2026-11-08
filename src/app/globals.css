@@ -28,6 +28,7 @@
   --ds-surface: #ffffff;
   --ds-subtle: #f3f5f8;
   --ds-primary: #2457d6;
+  --ds-primary-soft: #eef3fd;
   --ds-heading: #1f2937;
   --ds-text: #667085;
   --ds-border: #e5e7eb;
@@ -59,6 +60,7 @@
   --color-ds-surface: var(--ds-surface);
   --color-ds-subtle: var(--ds-subtle);
   --color-ds-primary: var(--ds-primary);
+  --color-ds-primary-soft: var(--ds-primary-soft);
   --color-ds-heading: var(--ds-heading);
   --color-ds-text: var(--ds-text);
   --color-ds-border: var(--ds-border);
@@ -88,8 +90,11 @@ body {
   .eyebrow { @apply text-[10.5px] font-semibold uppercase tracking-[0.18em] text-blue; }
   .h1 { @apply text-2xl font-bold tracking-tight text-ink; }
   .h2 { @apply text-lg font-semibold text-ink; }
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full bg-blue px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50; }
-  /* Neon take on Meska Blue. White text on it passes AA (4.5:1), so hover adds glow instead of lightening. */
+  /* Every button is neon Meska Blue (white text passes AA, 4.5:1), so hover adds glow instead of lightening.
+     Only unselected filter tabs and red destructive actions stay quiet (.btn-quiet, .btn-danger). */
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full bg-neon px-4 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50; box-shadow: 0 0 12px rgb(31 107 255 / 0.45); }
+  .btn:hover:not(:disabled) { box-shadow: 0 0 20px rgb(31 107 255 / 0.75); }
+  .btn:disabled { box-shadow: none; }
   .btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-full bg-neon px-4 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50; box-shadow: 0 0 12px rgb(31 107 255 / 0.45); }
   .btn-ghost:hover:not(:disabled) { box-shadow: 0 0 20px rgb(31 107 255 / 0.75); }
   .btn-ghost:disabled { box-shadow: none; }
@@ -114,9 +119,15 @@ body {
   /* Neutral SaaS components (see the --ds-* tokens). */
   .ds-card { @apply rounded-2xl border border-ds-border bg-ds-surface; }
   .ds-icon { @apply grid h-10 w-10 flex-none place-items-center rounded-[10px] border border-ds-border bg-ds-surface text-ds-primary; }
-  /* Use as "ds-btn ds-btn-primary" or "ds-btn ds-btn-outline". */
+  /* Use as "ds-btn ds-btn-primary" (or the older "ds-btn ds-btn-outline"). */
   .ds-btn { @apply inline-flex h-10 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-primary/30 disabled:cursor-not-allowed disabled:opacity-50; }
-  .ds-btn-primary { @apply bg-ds-primary text-white hover:brightness-110; }
-  .ds-btn-outline { @apply border border-ds-border bg-ds-surface text-ds-heading hover:bg-ds-subtle; }
+  /* Both are the app's neon blue; "outline" is kept as a name so existing markup keeps working. */
+  .ds-btn-primary, .ds-btn-outline { @apply bg-neon text-white; box-shadow: 0 0 12px rgb(31 107 255 / 0.45); }
+  .ds-btn-primary:hover:not(:disabled), .ds-btn-outline:hover:not(:disabled) { box-shadow: 0 0 20px rgb(31 107 255 / 0.75); }
+  .ds-btn-primary:disabled, .ds-btn-outline:disabled { box-shadow: none; }
   .ds-badge { @apply inline-flex items-center gap-1.5 rounded-md bg-ds-subtle px-2.5 py-1 text-xs font-medium text-ds-heading; }
+  /* Meska blue accents, used sparingly: a solid icon tile for key figures, and a soft tile or chip elsewhere. */
+  .ds-icon-solid { @apply grid h-10 w-10 flex-none place-items-center rounded-[10px] bg-ds-primary text-white; }
+  .ds-icon-soft { @apply grid h-10 w-10 flex-none place-items-center rounded-[10px] bg-ds-primary-soft text-ds-primary; }
+  .ds-chip { @apply inline-flex items-center gap-1.5 rounded-md bg-ds-primary-soft px-2.5 py-1 text-xs font-medium text-ds-primary; }
 }

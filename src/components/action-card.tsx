@@ -8,7 +8,7 @@ export function ActionCard({ icon, title, lead, tone = "default", children }: { 
   return (
     <details className={`group rounded-xl border bg-ds-surface transition ${danger ? "border-ds-danger/30 open:border-ds-danger/50" : "border-ds-border open:border-ds-heading/20"}`}>
       <summary className={`flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 transition [&::-webkit-details-marker]:hidden ${danger ? "hover:bg-ds-danger/[0.03]" : "hover:bg-ds-subtle"}`}>
-        <span className={`grid h-9 w-9 flex-none place-items-center rounded-[10px] border ${danger ? "border-ds-danger/25 text-ds-danger" : "border-ds-border text-ds-heading"}`}>{icon}</span>
+        <span className={`grid h-9 w-9 flex-none place-items-center rounded-[10px] border ${danger ? "border-ds-danger/25 text-ds-danger" : "border-transparent bg-ds-primary-soft text-ds-primary"}`}>{icon}</span>
         <span className="min-w-0 flex-1">
           <span className={`block text-sm font-semibold ${danger ? "text-ds-danger" : "text-ds-heading"}`}>{title}</span>
           <span className="block text-xs text-ds-text">{lead}</span>
