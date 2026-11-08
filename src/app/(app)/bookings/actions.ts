@@ -10,7 +10,8 @@ import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, programVisible, sl
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
 import { checkAudioFile, checkFile, isAudioPath, safeName } from "@/lib/files";
-import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, userWithRole, type BookingRow } from "@/lib/notify";
+import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, type BookingRow } from "@/lib/notify";
+import { trainingTeam } from "@/lib/team";
 import {
   contactError,
   contactFields,
@@ -292,10 +293,17 @@ export async function assignTrainer(assignments: { bookingId: string; trainerId:
     await audit(me.id, "trainer_assigned", b.id, { program: title(b), trainer: b.trainers?.full_name });
     await emailAssignment(b);
   }
-  await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
-    title: `${me.full_name} assigned ${[...new Set(rows.map((b) => b.trainers?.full_name))].join(", ")} to ${rows[0].program_name}`,
+  const names = [...new Set(rows.map((b) => b.trainers?.full_name))].join(", ");
+  await notify(await trainingTeam(rows[0], me.id), {
+    title: `${me.full_name} assigned ${names} to ${rows[0].program_name}`,
     body: rows.map((b) => `Day ${b.day_number}: ${b.trainers?.full_name}`).join(" · "),
     link: `/bookings/${rows[0].id}`,
+    email: {
+      subject: `Trainer assigned: ${rows[0].program_name}`,
+      intro: `<b>${esc(me.full_name)}</b> assigned <b>${esc(names)}</b>. The trainer was emailed to confirm.`,
+      rows: rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${esc(b.trainers?.full_name ?? "")}`] as [string, string]),
+      button: "View the training",
+    },
   });
   refresh();
   return { ok: rows.length > 1 ? `Assigned ${rows.length} days. The trainer${new Set(rows.map((b) => b.trainer_id)).size > 1 ? "s were" : " was"} emailed to confirm.` : "Assigned. The trainer was emailed to confirm." };
@@ -346,33 +354,24 @@ export async function respondBooking(id: string, accept: boolean, comment: strin
   if (error) return { error: friendlyError(error.message) };
   if (!changed?.length) return { error: "This booking no longer needs a response." };
   await audit(me.id, accept ? "booking_confirmed" : "booking_declined", id, { comment, program: title(b) });
-  // The Growth member who requested the training is emailed when the trainer confirms.
-  const requester = accept ? await userWithRole(b.created_by, "growth") : null;
-  const recipients = (await usersWithRoles("approver", "admin")).filter((r) => r.id !== me.id && r.id !== requester?.id);
-  if (requester && requester.id !== me.id) {
-    await notify([requester], {
-      title: `${me.full_name} confirmed ${title(b)}`,
-      body: when(b),
-      link: `/bookings/${id}`,
-      email: {
-        subject: `Trainer confirmed: ${title(b)}`,
-        intro: `<b>${esc(me.full_name)}</b> confirmed the training you requested.`,
-        rows: bookingRows(b),
-        button: "View the training",
-      },
-    });
-  }
-  await notify(recipients, {
+  // Everyone on the training hears the answer: Training Excellence, admins, the Growth requester and the content team.
+  const status = accept ? "confirmed" : "needs_trainer";
+  await notify(await trainingTeam(b, me.id), {
     title: accept ? `${me.full_name} confirmed ${title(b)}` : `${me.full_name} declined ${title(b)} — trainer needed`,
     body: accept ? when(b) : `Reason: ${comment.trim()}. It's back to “Needs a trainer”.`,
     link: `/bookings/${id}`,
     email: accept
-      ? undefined
+      ? {
+          subject: `Trainer confirmed: ${title(b)}`,
+          intro: `<b>${esc(me.full_name)}</b> confirmed this training.`,
+          rows: [...bookingRows({ ...b, status }), ...(comment.trim() ? [["Comment", esc(comment.trim())] as [string, string]] : [])],
+          button: "View the training",
+        }
       : {
           subject: `Trainer declined: ${title(b)}`,
-          intro: `<b>${esc(me.full_name)}</b> can't deliver this training. It's back to <b>Needs a trainer</b>; please assign someone else.`,
-          rows: [...bookingRows(b), ["Reason", esc(comment.trim())]],
-          button: "Assign another trainer",
+          intro: `<b>${esc(me.full_name)}</b> can't deliver this training. It's back to <b>Needs a trainer</b>; Training Excellence will assign someone else.`,
+          rows: [...bookingRows({ ...b, status }), ["Reason", esc(comment.trim())]],
+          button: "View the training",
         },
   });
   refresh();
@@ -456,10 +455,10 @@ export async function editBooking(fd: FormData) {
       },
     });
   }
-  await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), { title: `Training updated: ${title(fresh)}`, body: summary, link: `/bookings/${id}`, email });
+  await notify(await trainingTeam(fresh, me.id), { title: `Training updated: ${title(fresh)}`, body: summary, link: `/bookings/${id}`, email });
   refresh();
   revalidatePath(`/bookings/${id}`);
-  return { ok: fresh.trainer_id ? "Saved. The trainer, admins and Training Excellence were notified of the changes." : "Saved. Admins and Training Excellence were notified of the changes." };
+  return { ok: fresh.trainer_id ? "Saved. The trainer and the team were notified of the changes." : "Saved. The team was notified of the changes." };
 }
 
 /* ---------- Client contact (whole request) ---------- */
@@ -477,6 +476,18 @@ export async function updateContact(fd: FormData) {
   const { error } = await (b.batch_id ? q.eq("batch_id", b.batch_id) : q.eq("id", id));
   if (error) return { error: friendlyError(error.message) };
   await audit(me.id, "client_contact_updated", id, { program: b.program_name, contact: contactFields(c) });
+  const contactLine = `${esc(c.name.trim())} · ${esc(c.email.trim())} · ${esc(c.mobile.trim())}`;
+  await notify(await trainingTeam(b, me.id), {
+    title: `Client contact updated: ${b.program_name}`,
+    body: `${c.name.trim()} · ${c.email.trim()} · ${c.mobile.trim()}`,
+    link: `/bookings/${id}`,
+    email: {
+      subject: `Client contact updated: ${b.program_name}`,
+      intro: `<b>${esc(me.full_name)}</b> updated the client contact for this training.`,
+      rows: [["Program", esc(b.program_name)], ["Client contact", contactLine]],
+      button: "View the training",
+    },
+  });
   revalidatePath(`/bookings/${id}`);
   return { ok: b.batch_id ? "Client contact saved for every day of this request." : "Client contact saved." };
 }
@@ -489,6 +500,20 @@ export async function cancelBooking(fd: FormData) {
   const reason = String(fd.get("reason") ?? "").replace(/\r\n/g, "\n").trim();
   const [b] = await loadBookings([id]);
   if (!b || !mayChange(me, b)) return { error: "Booking not found." };
+  const r = await cancelDay(me, b, reason);
+  if ("error" in r) return r;
+  await notifyCancelled(me, [r]);
+  refresh();
+  revalidatePath(`/bookings/${id}`);
+  return { ok: "Cancelled. The trainer and the team were notified, and the reason is in the activity log." };
+}
+
+type Canceller = { id: string; full_name: string };
+type CancelledDay = { b: BookingRow; reason: string; shortNotice: boolean };
+
+// Cancels one day and tells its trainer. The team is told once for all the days (notifyCancelled).
+async function cancelDay(me: Canceller, b: BookingRow, reason: string): Promise<CancelledDay | { error: string }> {
+  const id = b.id;
   if (!ACTIVE.includes(b.status)) return { error: "This booking is not active." };
   const rule = await getSetting("cancellation", { notice_hours: 48, min_reason_chars: 150 });
   const hoursLeft = (cairoStart(b.date, b.start_time).getTime() - Date.now()) / 3_600_000;
@@ -503,7 +528,7 @@ export async function cancelBooking(fd: FormData) {
   if (error) return { error: friendlyError(error.message) };
   if (!cancelled?.length) return { error: "This booking changed in the meantime. Refresh the page and try again." };
   await audit(me.id, "booking_cancelled", id, { reason, short_notice: shortNotice, hours_before: Math.round(hoursLeft), program: title(b) });
-  // The trainer only hears that it was cancelled; the reason goes to the admin and the log.
+  // The trainer only hears that it was cancelled; the reason goes to the team and the log.
   if (b.trainer_id) {
     await notify([await trainerRecipient(b)], {
       title: `Training cancelled: ${trainerTitle(b)}`,
@@ -518,14 +543,32 @@ export async function cancelBooking(fd: FormData) {
       },
     });
   }
-  await notify(await usersWithRoles("admin"), {
-    title: `${shortNotice ? "Short-notice cancellation" : "Cancelled"}: ${title(b)}`,
-    body: `${me.full_name}: ${reason}`,
-    link: `/admin/logs?only=cancellations`,
+  return { b, reason, shortNotice };
+}
+
+// One message to everyone on the training (admins, Training Excellence, the Growth requester, the content team),
+// with the reason, however many days were cancelled.
+async function notifyCancelled(me: Canceller, days: CancelledDay[]) {
+  if (!days.length) return;
+  const first = days[0].b;
+  const shortNotice = days.some((d) => d.shortNotice);
+  const label = days.length > 1 ? `${first.program_name} (${days.length} days)` : title(first);
+  const hadTrainer = days.some((d) => d.b.trainer_id);
+  await notify(await trainingTeam(first, me.id), {
+    title: `${shortNotice ? "Short-notice cancellation" : "Training cancelled"}: ${label}`,
+    body: `${me.full_name}: ${days[0].reason}`,
+    link: `/bookings/${first.id}`,
+    email: {
+      subject: `Training cancelled: ${label}`,
+      intro: `<b>${esc(me.full_name)}</b> cancelled ${days.length > 1 ? `${days.length} days of this training` : "this training"}${shortNotice ? " at short notice" : ""}.${hadTrainer ? " The trainer was told." : ""}`,
+      rows: [
+        ["Program", esc(first.program_name)],
+        ...days.map((d) => [`Day ${d.b.day_number}`, `${esc(when(d.b))}${d.b.trainers ? ` · ${esc(d.b.trainers.full_name)}` : ""}`] as [string, string]),
+        ["Reason", esc(days[0].reason)],
+      ],
+      button: "View the training",
+    },
   });
-  refresh();
-  revalidatePath(`/bookings/${id}`);
-  return { ok: "Cancelled. The trainer was notified and the reason is in the activity log." };
 }
 
 /* ---------- Materials ---------- */
@@ -663,10 +706,16 @@ export async function reassignTraining(fd: FormData) {
     });
   }
   if (released.length) {
-    await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
+    await notify(await trainingTeam(b, me.id), {
       title: `${me.full_name} is reassigning ${b.program_name}`,
       body: `${released.length} ${released.length === 1 ? "day needs" : "days need"} a trainer.`,
       link: `/dashboard/${b.id}`,
+      email: {
+        subject: `Trainer removed: ${b.program_name}`,
+        intro: `<b>${esc(me.full_name)}</b> took the trainer off ${released.length === 1 ? "one day" : `${released.length} days`} of this training, so ${released.length === 1 ? "it needs" : "they need"} a new trainer. The previous trainer was told.`,
+        rows: [["Program", esc(b.program_name)], ...released.map((d) => [`Day ${d.day_number}`, `${esc(when(d))} · was ${esc(d.trainers?.full_name ?? "")}`] as [string, string])],
+        button: "View the training",
+      },
     });
   }
   refreshTraining();
@@ -677,7 +726,7 @@ export async function reassignTraining(fd: FormData) {
 
 // Cancels what is left of a training. Delivered days, and past days the trainer had confirmed, stay on record.
 export async function cancelTraining(fd: FormData) {
-  await requireRole("admin", "approver");
+  const me = await requireRole("admin", "approver");
   const [b] = await loadBookings([String(fd.get("id"))]);
   if (!b) return { error: "Training not found." };
   const today = todayISO();
@@ -686,20 +735,22 @@ export async function cancelTraining(fd: FormData) {
     .filter((d) => ACTIVE.includes(d.status) && !d.finished_at && (d.date >= today || d.status !== "confirmed"))
     .sort((x, y) => x.date.localeCompare(y.date));
   if (!targets.length) return { error: "No day of this training can be cancelled." };
-  let done = 0;
+  const reason = String(fd.get("reason") ?? "").replace(/\r\n/g, "\n").trim();
+  const done: CancelledDay[] = [];
+  let failure: string | null = null;
   for (const d of targets) {
-    const one = new FormData();
-    one.set("id", d.id);
-    one.set("reason", String(fd.get("reason") ?? ""));
-    const r = await cancelBooking(one);
-    if (r.error) {
-      refreshTraining();
-      return { error: done ? `${done} of ${targets.length} days were cancelled. ${r.error}` : r.error };
+    const r = await cancelDay(me, d, reason);
+    if ("error" in r) {
+      failure = r.error;
+      break;
     }
-    done += 1;
+    done.push(r);
   }
+  // The team hears once about every day that was cancelled, even if a later day stopped the rest.
+  await notifyCancelled(me, done);
   refreshTraining();
-  return { ok: "Training cancelled. The trainer was notified and the reason is in the activity log." };
+  if (failure) return { error: done.length ? `${done.length} of ${targets.length} days were cancelled. ${failure}` : failure };
+  return { ok: "Training cancelled. The trainer and the team were notified, and the reason is in the activity log." };
 }
 
 /* ---------- Trainer brief after the training ---------- */
@@ -777,7 +828,7 @@ export async function submitBrief(bookingId: string, text: string) {
   const { error } = await db().from("bookings").update({ brief: brief || null, brief_submitted_at: now, finished_at: r.b.finished_at ?? now }).eq("id", bookingId);
   if (error) return { error: friendlyError(error.message) };
   await audit(r.me.id, "brief_submitted", bookingId, { program: title(r.b) });
-  await notify(await usersWithRoles("admin", "approver"), {
+  await notify(await trainingTeam(r.b, r.me.id), {
     title: `${first ? "Training delivered" : "Brief updated"}: ${title(r.b)}`,
     body: `${r.me.full_name}${brief ? `: ${brief.slice(0, 140)}${brief.length > 140 ? "…" : ""}` : " attached a document."}`,
     link: `/dashboard/${bookingId}`,

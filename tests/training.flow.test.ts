@@ -36,7 +36,11 @@ vi.mock("@/lib/notify", async (importOriginal) => {
     ...real,
     audit: async (_by: string, action: string) => void h.audits.push(action),
     notify: async (to: ({ email: string | null } | null)[], n: { title: string }) => void h.notified.push({ to: to.map((r) => r?.email ?? "?"), title: n.title }),
-    usersWithRoles: async () => [{ id: "admin-1", email: "admin@meska.ai", full_name: "Admin" }],
+    usersWithRoles: async (...roles: string[]) => [
+      { id: "admin-1", email: "admin@meska.ai", full_name: "Admin" },
+      ...(roles.includes("content") ? [{ id: "content-1", email: "content@meska.ai", full_name: "Content Person" }] : []),
+    ],
+    userById: async (id: string | null) => (id === "growth-1" ? { id, email: "growth@meska.ai", full_name: "Growth Person" } : null),
     userWithRole: async () => null,
     trainerRecipient: async () => ({ id: "", email: "trainer@example.com", full_name: "Trainer One" }),
   };
@@ -92,7 +96,10 @@ describe("reassigning a training", () => {
   it("tells the trainer for each day, and the team once", async () => {
     await reassignTraining(form({ id: NEXT_DAY }));
     expect(h.notified.filter((n) => n.to.includes("trainer@example.com"))).toHaveLength(2);
-    expect(h.notified.filter((n) => n.to.includes("admin@meska.ai"))).toHaveLength(1);
+    const team = h.notified.filter((n) => n.to.includes("admin@meska.ai"));
+    expect(team).toHaveLength(1);
+    // the whole team on the deal: admins and Training Excellence, the content team, and the Growth requester
+    expect(team[0].to).toEqual(["admin@meska.ai", "content@meska.ai", "growth@meska.ai"]);
   });
   it("skips a past day the trainer never reported on", async () => {
     h.fake.tables.bookings = [day(DONE_DAY, 1, { date: PAST }), day(NEXT_DAY, 2)];
@@ -122,6 +129,17 @@ describe("cancelling a training", () => {
     expect(row(LAST_DAY).status).toBe("cancelled");
     expect(row(DONE_DAY).status).toBe("confirmed");
     expect(h.audits).toEqual(["booking_cancelled", "booking_cancelled"]);
+  });
+  it("tells the trainer for each day, and the whole team once with the reason", async () => {
+    await cancelTraining(form({ id: NEXT_DAY, reason: LONG_REASON }));
+    expect(h.notified.filter((n) => n.to.includes("trainer@example.com")).map((n) => n.title)).toEqual(["Training cancelled: AI in HR — Day 2", "Training cancelled: AI in HR — Day 3"]);
+    const team = h.notified.filter((n) => !n.to.includes("trainer@example.com"));
+    expect(team).toEqual([{ to: ["admin@meska.ai", "content@meska.ai", "growth@meska.ai"], title: "Training cancelled: AI in HR (2 days)" }]);
+  });
+  it("leaves out the person who cancelled", async () => {
+    h.me = { ...h.me, id: "admin-1", role: "admin" };
+    await cancelTraining(form({ id: NEXT_DAY, reason: LONG_REASON }));
+    expect(h.notified.at(-1)!.to).toEqual(["content@meska.ai", "growth@meska.ai"]);
   });
   it("keeps a past day the trainer confirmed, and cancels one that never had a trainer", async () => {
     h.fake.tables.bookings = [day(DONE_DAY, 1, { date: PAST }), day(NEXT_DAY, 2, { date: PAST, status: "needs_trainer", trainer_id: null })];
@@ -168,7 +186,7 @@ describe("marking a day as delivered", () => {
     expect(await addAudio()).toEqual({ ok: "Added session.mp3." });
     expect(await submitBrief(TODAY_DAY, "It went well.")).toEqual({ ok: expect.stringMatching(/marked as delivered/) });
     expect(row(TODAY_DAY)).toMatchObject({ brief: "It went well.", finished_at: expect.any(String), brief_submitted_at: expect.any(String) });
-    expect(h.notified.map((n) => n.title)).toContain("Training delivered: AI in HR — Day 1");
+    expect(h.notified).toContainEqual({ to: ["admin@meska.ai", "content@meska.ai", "growth@meska.ai"], title: "Training delivered: AI in HR — Day 1" });
     expect(h.audits).toEqual(["audio_uploaded", "brief_submitted"]);
   });
   it("a brief document with audio is enough", async () => {

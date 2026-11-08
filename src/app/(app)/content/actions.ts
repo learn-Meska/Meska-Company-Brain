@@ -6,7 +6,8 @@ import { db } from "@/lib/supabase";
 import { esc } from "@/lib/email";
 import { checkFile, downloadName, safeName } from "@/lib/files";
 import { friendlyError, isUuid } from "@/lib/format";
-import { audit, BOOKING_SELECT, notify, trainerRecipient, usersWithRoles, type BookingRow } from "@/lib/notify";
+import { audit, BOOKING_SELECT, notify, trainerRecipient, type BookingRow } from "@/lib/notify";
+import { trainingTeam } from "@/lib/team";
 
 const MAX_GUIDE = 20000;
 
@@ -95,10 +96,19 @@ export async function submitContent(dealId: string, guide: string) {
       },
     });
   }
-  await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
+  await notify(await trainingTeam(d.days[0], me.id), {
     title: `Content ${again ? "updated" : "submitted"}: ${label}`,
     body: `${me.full_name} ${again ? "updated" : "submitted"} the content.`,
     link: `/bookings/${d.days[0].id}`,
+    email: {
+      subject: `Content ${again ? "updated" : "submitted"}: ${label}`,
+      intro: `<b>${esc(me.full_name)}</b> ${again ? "updated" : "submitted"} the content for this training.${mine.size ? " The assigned trainer can now see it." : " The trainer will see it once one is assigned."}`,
+      rows: [
+        ["Company", esc(d.deal.company_name)],
+        ["Program", esc(d.days[0].program_name)],
+      ],
+      button: "View the training",
+    },
   });
   revalidatePath(`/content/${dealId}`);
   revalidatePath("/content");
