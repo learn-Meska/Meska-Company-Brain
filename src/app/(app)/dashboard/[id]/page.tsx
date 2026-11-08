@@ -84,25 +84,25 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
     reassignable.length > 0 || cancellable.length > 0 ? (
       <>
         {reassignable.length > 0 && (
-          <ActionCard icon={<SwapIcon />} title="Reassign trainer" lead="Give this training to a different trainer.">
-            <p className="text-xs text-muted">
+          <ActionCard icon={<SwapIcon size={18} />} title="Reassign trainer" lead="Give this training to a different trainer.">
+            <p className="text-xs leading-relaxed text-ds-text">
               Removes the trainer from {reassignable.length === 1 ? "the upcoming day" : `the ${reassignable.length} upcoming days`} and tells them and the team. The training goes back to “Needs a trainer” so you can choose someone else above. Days already delivered stay as they are.
             </p>
             <Form action={reassignTraining}>
               <input type="hidden" name="id" value={b.id} />
-              <Submit className="btn-ghost" pending="Removing…">Remove trainer and reassign</Submit>
+              <Submit className="ds-btn ds-btn-outline" pending="Removing…">Remove trainer and reassign</Submit>
             </Form>
           </ActionCard>
         )}
         {cancellable.length > 0 && (
-          <ActionCard icon={<TrashIcon />} title="Cancel training" lead="Cancel what is left of this training." tone="danger">
-            <p className="text-xs text-muted">
+          <ActionCard icon={<TrashIcon size={18} />} title="Cancel training" lead="Cancel what is left of this training." tone="danger">
+            <p className="text-xs leading-relaxed text-ds-text">
               Cancels {cancellable.length === 1 ? "the remaining day" : `the ${cancellable.length} remaining days`}. The trainer is told, and the team gets the reason. Within {rule.notice_hours} hours of the start, or after a date has passed, at least {rule.min_reason_chars} characters are required.
             </p>
             <Form action={cancelTraining} className="space-y-2">
               <input type="hidden" name="id" value={b.id} />
               <textarea name="reason" rows={4} required className="input" placeholder="Why is this training being cancelled?" />
-              <Submit className="btn-danger" pending="Cancelling…">Cancel this training</Submit>
+              <Submit className="ds-btn bg-ds-danger text-white hover:brightness-110" pending="Cancelling…">Cancel this training</Submit>
             </Form>
           </ActionCard>
         )}

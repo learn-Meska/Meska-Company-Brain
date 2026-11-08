@@ -1,14 +1,12 @@
 import type { ReactNode } from "react";
 import { ProposalActions } from "@/components/booking-ui";
-import { BriefcaseIcon, BuildingIcon, CalendarIcon, CoinsIcon, DownloadIcon, LayersIcon, TagIcon, UsersIcon } from "@/components/icons";
+import { BuildingIcon, CalendarIcon, CoinsIcon, DownloadIcon, LayersIcon, TagIcon, UsersIcon } from "@/components/icons";
 import { db } from "@/lib/supabase";
 import { dealTotal, fmtAmount } from "@/lib/deal";
 
 type Deal = { id: string; company_name: string; value_per_day: number | string; days: number; proposal_name: string; proposal_size: number | null };
 type Person = { name: string; title: string | null; department: string | null };
 
-const AVATAR = ["bg-[#DBEAFE] text-[#1E3A8A]", "bg-[#E0E7FF] text-[#3730A3]", "bg-[#DCFCE7] text-[#166534]", "bg-[#FCE7F3] text-[#9D174D]", "bg-[#FEF3C7] text-[#92400E]", "bg-[#E0F2FE] text-[#075985]"];
-const avatarStyle = (name: string) => AVATAR[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATAR.length];
 const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -17,29 +15,33 @@ const initials = (name: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join("") || "?";
 
-// The proposal's file type, shown as a small coloured tile like the one in a file manager.
+// The proposal's file type as a small document tile (Word blue, PDF red, anything else neutral).
 function FileBadge({ name }: { name: string }) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  const [label, style] = ext === "pdf" ? ["PDF", "bg-[#FDE8E7] text-[#C0362C]"] : ext === "doc" || ext === "docx" ? ["W", "bg-[#E1ECFD] text-[#185ABD]"] : ext === "ppt" || ext === "pptx" ? ["P", "bg-[#FDEBE4] text-[#C43E1C]"] : [ext.slice(0, 4).toUpperCase() || "FILE", "bg-surface2 text-muted"];
-  return <span className={`grid h-12 w-12 flex-none place-items-center rounded-xl text-sm font-bold ${style}`}>{label}</span>;
+  const [label, tone] =
+    ext === "pdf" ? ["PDF", "text-ds-danger"] : ext === "doc" || ext === "docx" ? ["DOC", "text-ds-primary"] : ext === "ppt" || ext === "pptx" ? ["PPT", "text-[#C2410C]"] : [ext.slice(0, 4).toUpperCase() || "FILE", "text-ds-text"];
+  return (
+    <span className="relative grid h-12 w-10 flex-none place-items-end rounded-md border border-ds-border bg-ds-subtle pb-1.5">
+      <span aria-hidden className="absolute right-0 top-0 h-3 w-3 rounded-bl-[4px] border-b border-l border-ds-border bg-ds-surface" />
+      <span className={`w-full text-center text-[10px] font-bold tracking-wide ${tone}`}>{label}</span>
+    </span>
+  );
 }
 
-function Stat({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
+function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-ice2 bg-gradient-to-br from-ice to-ice2/70 p-4 @4xl:gap-4">
-      <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-white/80 text-royal shadow-sm">{icon}</span>
-      {/* the divider only where the tile has room for it */}
-      <span className="hidden h-10 w-px flex-none bg-ice2 @4xl:block" />
-      <div>
-        <dt className="whitespace-nowrap text-sm text-muted">{label}</dt>
-        <dd className="whitespace-nowrap text-xl font-bold tabular-nums text-ink @4xl:text-2xl">{value}</dd>
+    <div className="flex items-center gap-4 rounded-xl border border-ds-border bg-ds-surface p-4 sm:p-5">
+      <span className="ds-icon">{icon}</span>
+      <div className="min-w-0">
+        <dt className="text-sm text-ds-text">{label}</dt>
+        <dd className="mt-0.5 whitespace-nowrap text-2xl font-semibold tabular-nums tracking-tight text-ds-heading">{value}</dd>
       </div>
     </div>
   );
 }
 
 // The commercial side of a New deal: value, proposal and the participant list. Meska team only, never trainers.
-// `actions` (e.g. reassign or cancel the training) are shown at the bottom of the card.
+// `actions` (e.g. reassign or cancel the training) are shown under the participants.
 export async function DealCard({ dealId, bookingId, actions }: { dealId: string; bookingId: string; actions?: ReactNode }) {
   const [{ data: deal }, { data: people }, { data: days }] = await Promise.all([
     db().from("deals").select("id, company_name, value_per_day, days, proposal_name, proposal_size").eq("id", dealId).maybeSingle(),
@@ -57,91 +59,78 @@ export async function DealCard({ dealId, bookingId, actions }: { dealId: string;
   const size = d.proposal_size ? `${Math.max(0.1, d.proposal_size / 1048576).toFixed(1)} MB` : null;
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-br from-white via-white to-ice p-5 shadow-[0_8px_30px_rgb(15_40_90/0.06)] sm:p-6">
-      <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-ice2/60 blur-2xl" />
-      <div className="@container relative space-y-5">
+    <div className="@container space-y-6">
+      <section className="ds-card space-y-6 p-5 sm:p-6">
         <header>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-ice2 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-royal">
-            <TagIcon size={14} /> New deal
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-ds-primary/[0.08] px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-ds-primary">
+            <TagIcon size={13} /> New deal
           </span>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight text-ink sm:text-3xl">{d.company_name ? `${d.company_name} · Deal details` : "Deal details"}</h2>
-          <p className="mt-1 text-sm text-muted">Shared by every day of this request. Only the Meska team sees it; trainers don&apos;t.</p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-tight text-ds-heading">{d.company_name ? `${d.company_name} · Deal details` : "Deal details"}</h2>
+          <p className="mt-1 text-sm text-ds-text">Shared by every day of this request. Only the Meska team sees it; trainers don&apos;t.</p>
         </header>
 
-        <dl className="grid gap-3 @xl:grid-cols-3">
-          <Stat icon={<CoinsIcon />} label="Value per day" value={fmtAmount(perDay)} />
-          <Stat icon={<CalendarIcon />} label="Days" value={d.days} />
-          <Stat icon={<LayersIcon />} label="Total value" value={fmtAmount(dealTotal(perDay, d.days))} />
+        <dl className="grid gap-4 @xl:grid-cols-3">
+          <Metric icon={<CoinsIcon />} label="Value per day" value={fmtAmount(perDay)} />
+          <Metric icon={<CalendarIcon />} label="Days" value={d.days} />
+          <Metric icon={<LayersIcon />} label="Total value" value={fmtAmount(dealTotal(perDay, d.days))} />
         </dl>
 
-        <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-line bg-white/90 p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-ds-border bg-ds-surface p-4">
           <FileBadge name={d.proposal_name} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-semibold text-ink" title={d.proposal_name}>{d.proposal_name}</div>
-            <div className="text-sm text-muted">Proposal{size ? ` · ${size}` : ""}</div>
+          {/* wide enough to read the name; on a phone the buttons wrap to their own line instead */}
+          <div className="min-w-[11rem] flex-1">
+            <div className="truncate text-sm font-semibold text-ds-heading" title={d.proposal_name}>{d.proposal_name}</div>
+            <div className="mt-0.5 text-xs text-ds-text">Proposal{size ? ` · ${size}` : ""}</div>
           </div>
           <ProposalActions dealId={d.id} canPreview={/\.pdf$/i.test(d.proposal_name)} />
         </div>
+      </section>
 
-        <div className="overflow-hidden rounded-2xl border border-line bg-white/90">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-gradient-to-r from-ice to-white px-4 py-3">
-            <h3 className="flex items-center gap-3 text-lg font-semibold text-ink">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-ice2 text-royal"><UsersIcon /></span>
-              Participants ({list.length})
-            </h3>
-            {list.length > 0 && (
-              <a href={`/bookings/${bookingId}/participants`} className="inline-flex items-center gap-2 rounded-xl bg-royal px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:brightness-110">
-                <DownloadIcon size={18} /> Download CSV
-              </a>
-            )}
-          </div>
-          {list.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-muted">No participants on this deal.</p>
-          ) : (
-            <div className="max-h-[30rem] overflow-auto">
-              <table className="w-full min-w-[520px] text-sm">
-                <thead className="sticky top-0 z-10 bg-white">
-                  <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted">
-                    <th className="px-4 py-3">Participant</th>
-                    <th className="px-4 py-3">Department</th>
-                    <th className="px-4 py-3">Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.map((p, i) => (
-                    <tr key={i} className="border-t border-line transition hover:bg-ice/50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <span className={`grid h-10 w-10 flex-none place-items-center rounded-full text-sm font-semibold ${avatarStyle(p.name)}`}>{initials(p.name)}</span>
-                          <div className="min-w-0">
-                            <div className="truncate font-semibold text-ink">{p.name}</div>
-                            <div className="truncate text-xs text-muted">{p.title || "No title"}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        {p.department ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-ice px-3 py-1 text-xs font-medium text-royal">
-                            <BriefcaseIcon size={14} /> {p.department}
-                          </span>
-                        ) : (
-                          <span className="text-muted">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted">
-                        <div className="flex items-center gap-2"><CalendarIcon size={15} /> Training · {dayCount} {dayCount === 1 ? "day" : "days"}</div>
-                        <div className="mt-1 flex items-center gap-2"><BuildingIcon size={15} /> {where}</div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      <section className="ds-card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
+          <h3 className="flex items-center gap-3 text-base font-semibold text-ds-heading">
+            <span className="ds-icon h-9 w-9"><UsersIcon size={18} /></span>
+            Participants ({list.length})
+          </h3>
+          {list.length > 0 && (
+            <a href={`/bookings/${bookingId}/participants`} className="ds-btn ds-btn-primary">
+              <DownloadIcon size={16} /> Download CSV
+            </a>
           )}
         </div>
+        {list.length === 0 ? (
+          <p className="border-t border-ds-border px-5 py-6 text-sm text-ds-text sm:px-6">No participants on this deal.</p>
+        ) : (
+          // A table on wide cards; on narrow ones each participant stacks into a block, so nothing scrolls sideways.
+          <div role="table" aria-label="Participants" className="max-h-[32rem] overflow-y-auto border-t border-ds-border">
+            <div role="row" className="sticky top-0 z-10 hidden grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.3fr)] gap-4 border-b border-ds-border bg-ds-subtle px-6 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-ds-text @2xl:grid">
+              <span role="columnheader">Participant</span>
+              <span role="columnheader">Department</span>
+              <span role="columnheader">Details</span>
+            </div>
+            {list.map((p, i) => (
+              <div role="row" key={i} className="grid gap-3 border-b border-ds-border px-5 py-4 last:border-b-0 sm:px-6 @2xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.3fr)] @2xl:items-center @2xl:gap-4">
+                <div role="cell" className="flex min-w-0 items-center gap-3">
+                  <span className="grid h-9 w-9 flex-none place-items-center rounded-full border border-ds-border bg-ds-subtle text-xs font-semibold text-ds-heading">{initials(p.name)}</span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-ds-heading">{p.name}</div>
+                    <div className="truncate text-xs text-ds-text">{p.title || "No title"}</div>
+                  </div>
+                </div>
+                <div role="cell" className="pl-12 @2xl:pl-0">
+                  {p.department ? <span className="ds-badge">{p.department}</span> : <span className="text-sm text-ds-text">—</span>}
+                </div>
+                <div role="cell" className="space-y-1 pl-12 text-xs text-ds-text @2xl:pl-0">
+                  <div className="flex items-center gap-2"><CalendarIcon size={14} className="flex-none text-ds-text" /> Training · {dayCount} {dayCount === 1 ? "day" : "days"}</div>
+                  <div className="flex items-center gap-2"><BuildingIcon size={14} className="flex-none text-ds-text" /> <span className="truncate">{where}</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
-        {actions && <div className="grid items-start gap-3 @2xl:grid-cols-2">{actions}</div>}
-      </div>
-    </section>
+      {actions && <div className="grid items-start gap-4 @2xl:grid-cols-2">{actions}</div>}
+    </div>
   );
 }

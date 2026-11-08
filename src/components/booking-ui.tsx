@@ -142,12 +142,12 @@ export function ProposalActions({ dealId, canPreview }: { dealId: string; canPre
     <div className="flex flex-wrap items-center gap-2">
       {err && <span className="text-xs text-bad">{err}</span>}
       {canPreview && (
-        <button type="button" onClick={() => open(true)} disabled={busy} title="Preview" aria-label="Preview the proposal" className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-surface text-ink transition hover:border-blue hover:text-blue disabled:opacity-50">
-          <EyeIcon size={18} />
+        <button type="button" onClick={() => open(true)} disabled={busy} title="Preview" aria-label="Preview the proposal" className="ds-btn ds-btn-outline w-10 px-0">
+          <EyeIcon size={16} />
         </button>
       )}
-      <button type="button" onClick={() => open(false)} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-xl border border-ice2 bg-ice px-4 text-sm font-medium text-royal transition hover:bg-ice2 disabled:opacity-50">
-        <DownloadIcon size={18} /> Download
+      <button type="button" onClick={() => open(false)} disabled={busy} className="ds-btn ds-btn-outline">
+        <DownloadIcon size={16} /> Download
       </button>
     </div>
   );
