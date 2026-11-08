@@ -18,7 +18,8 @@ function Note({ m }: { m: Msg }) {
 }
 
 // The content team's workspace for one deal: write the guide, upload files, then submit so the trainer sees them.
-export function ContentEditor({ dealId, initialGuide, submittedAt, files }: { dealId: string; initialGuide: string; submittedAt: string | null; files: File_[] }) {
+// canWrite: upload and remove files; canSubmit: save the guide and send it to the trainer (portal accesses).
+export function ContentEditor({ dealId, initialGuide, submittedAt, files, canWrite = true, canSubmit = true }: { dealId: string; initialGuide: string; submittedAt: string | null; files: File_[]; canWrite?: boolean; canSubmit?: boolean }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [guide, setGuide] = useState(initialGuide);
@@ -83,16 +84,18 @@ export function ContentEditor({ dealId, initialGuide, submittedAt, files }: { de
 
       <div>
         <label className="label" htmlFor="guide">Guide for the trainer</label>
-        <textarea id="guide" rows={10} className="input" value={guide} onChange={(e) => setGuide(e.target.value)} placeholder="Objectives, agenda per day, exercises, tips for this audience…" />
+        <textarea id="guide" rows={10} className="input" readOnly={!canSubmit} value={guide} onChange={(e) => setGuide(e.target.value)} placeholder="Objectives, agenda per day, exercises, tips for this audience…" />
       </div>
 
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold">Files ({files.length})</h3>
-          <label className="btn-ghost btn-sm cursor-pointer">
-            {busy ? "Uploading…" : "+ Upload files"}
-            <input ref={input} type="file" multiple className="hidden" disabled={busy} onChange={(e) => upload(e.target.files)} />
-          </label>
+          {canWrite && (
+            <label className="btn-ghost btn-sm cursor-pointer">
+              {busy ? "Uploading…" : "+ Upload files"}
+              <input ref={input} type="file" multiple className="hidden" disabled={busy} onChange={(e) => upload(e.target.files)} />
+            </label>
+          )}
         </div>
         {files.length === 0 ? (
           <p className="text-sm text-muted">No files yet. Slides, documents, sheets, images, audio/video or a .zip.</p>
@@ -103,9 +106,11 @@ export function ContentEditor({ dealId, initialGuide, submittedAt, files }: { de
                 <DownloadButton id={f.id} name={f.file_name} kind="content" />
                 <span className="flex items-center gap-3 text-xs text-muted">
                   {f.size_bytes ? `${(f.size_bytes / 1048576).toFixed(1)} MB` : ""}
-                  <button type="button" className="text-bad hover:underline" disabled={pending} onClick={() => confirm(`Remove ${f.file_name}?`) && remove(f.id)}>
-                    Remove
-                  </button>
+                  {canWrite && (
+                    <button type="button" className="text-bad hover:underline" disabled={pending} onClick={() => confirm(`Remove ${f.file_name}?`) && remove(f.id)}>
+                      Remove
+                    </button>
+                  )}
                 </span>
               </li>
             ))}
@@ -113,12 +118,14 @@ export function ContentEditor({ dealId, initialGuide, submittedAt, files }: { de
         )}
       </div>
 
+      {canSubmit && (
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn" disabled={pending || busy} onClick={submit}>
           {pending ? "Saving…" : submittedAt ? "Send update to the trainer" : "Submit to the trainer"}
         </button>
         <span className="text-xs text-muted">Saves the guide and notifies the assigned trainer and Training Excellence.</span>
       </div>
+      )}
       <Note m={m} />
     </section>
   );

@@ -8,7 +8,7 @@ import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
 import { isUuid } from "@/lib/format";
 import { hasUnprintable } from "@/lib/pdf-text";
 import { ensureAuthUser, rolesText, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
-import { cleanTeamAdmin } from "@/lib/team-access";
+import { cleanPermissions, cleanTeamAdmin } from "@/lib/team-access";
 import { audit } from "@/lib/notify";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -183,6 +183,8 @@ async function sendTrainerAccess(email: string, name: string) {
 const pickRoles = (fd: FormData) => STAFF_ROLES.filter((r) => fd.getAll("roles").map(String).includes(r));
 // The "Team admin" ticks, kept only for teams the person is in.
 const pickTeamAdmin = (fd: FormData, roles: string[]) => cleanTeamAdmin(roles, fd.getAll("team_admin").map(String));
+// The ticked accesses, kept only for portals the person is in.
+const pickAccess = (fd: FormData, roles: string[]) => cleanPermissions(roles, fd.getAll("access").map(String));
 
 // One email can hold several roles (e.g. Booking manager + Growth); the highest becomes the main one.
 export async function addTeamMember(fd: FormData) {
@@ -205,7 +207,7 @@ export async function addTeamMember(fd: FormData) {
     const all = [...new Set([...held, ...roles])];
     const { error } = await db()
       .from("app_users")
-      .upsert({ id, email, full_name, role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all) });
+      .upsert({ id, email, full_name, role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all), permissions: pickAccess(fd, all) });
     if (error) return failed("addTeamMember", error);
     await audit(me.id, "team_member_added", null, { email, roles, team_admin_of: pickTeamAdmin(fd, all) });
     await sendInvite(email, full_name, rolesText(roles));
@@ -228,7 +230,7 @@ export async function updateTeamMember(fd: FormData) {
   // Keep the trainer role if they have one; only the staff roles are edited here.
   const keep = ((cur as { roles: string[] | null }).roles ?? []).filter((r) => !(STAFF_ROLES as readonly string[]).includes(r));
   const all = [...new Set([...roles, ...keep])];
-  const { error } = await db().from("app_users").update({ role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all) }).eq("id", id);
+  const { error } = await db().from("app_users").update({ role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all), permissions: pickAccess(fd, all) }).eq("id", id);
   if (error) return failed("updateTeamMember", error);
   return done("/admin/users", "Access saved.");
 }
@@ -246,7 +248,7 @@ export async function removeTeamMember(fd: FormData) {
   const { data: t } = await db().from("trainers").select("id").eq("user_id", id).maybeSingle();
   const { error } = await db()
     .from("app_users")
-    .update({ role: "trainer", roles: [], team_admin_of: [], can_manage_trainers: false })
+    .update({ role: "trainer", roles: [], team_admin_of: [], permissions: [], can_manage_trainers: false })
     .eq("id", id);
   if (error) return failed("removeTeamMember", error);
   if (!t) {

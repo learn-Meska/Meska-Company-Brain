@@ -1,16 +1,19 @@
 import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { StatusBadge } from "@/components/status";
-import { requireRole } from "@/lib/auth";
+import { can, requireRole } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { fmtDate, fmtTime, STATUS_LABEL, todayISO } from "@/lib/format";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 
 export default async function BookingsPage({ searchParams }: PageProps<"/bookings">) {
-  await requireRole("admin", "approver", "growth");
+  const me = await requireRole("admin", "approver", "growth");
+  // Growth without "See all bookings" sees only the requests they made.
+  const onlyMine = me.role === "growth" && !can(me, "growth.all_bookings");
   const { status, when, new: isNew, requested } = await searchParams;
   let q = db().from("bookings").select(BOOKING_SELECT).order("date", { ascending: when !== "past" }).limit(300);
   if (typeof status === "string" && status) q = q.eq("status", status);
+  if (onlyMine) q = q.eq("created_by", me.id);
   q = when === "past" ? q.lt("date", todayISO()) : q.gte("date", todayISO());
   const { data } = await q;
   const rows = (data ?? []) as BookingRow[];
@@ -19,7 +22,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
     <div className="space-y-5">
       {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Request sent. It&apos;s on the calendar as “Needs a trainer” and Training Excellence was notified.</p>}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
-      <PageHeader kicker="Bookings" title={<>All bookings</>} />
+      <PageHeader kicker="Bookings" title={onlyMine ? <>My bookings</> : <>All bookings</>} />
       <div className="flex flex-wrap gap-2">
         <Link href={link({ when: "upcoming" })} className={when !== "past" ? "btn btn-sm" : "btn-quiet btn-sm"}>Upcoming</Link>
         <Link href={link({ when: "past" })} className={when === "past" ? "btn btn-sm" : "btn-quiet btn-sm"}>Past</Link>

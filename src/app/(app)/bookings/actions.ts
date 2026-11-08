@@ -2,7 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
-import { requireRole, requireTrainer, requireUser } from "@/lib/auth";
+import { can, requireAccess, requireRole, requireTrainer, requireUser, type CurrentUser } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { esc, siteUrl } from "@/lib/email";
 import { trainingIcs } from "@/lib/ics";
@@ -51,7 +51,7 @@ export type DayQuery = { date: string; start: string; end: string; skillIds: str
 // Growth: check availability for several days at once, each with its own content (skills).
 // With sameTrainer, only trainers free and matching on every day are returned.
 export async function findForDays(input: { audienceId: string; industryId: string; sameTrainer: boolean; days: DayQuery[] }) {
-  await requireRole("admin", "approver");
+  await requireAccess("te.find", "te.assign");
   if (!input.days.length) return { error: "Add at least one day." };
   for (const [i, d] of input.days.entries()) {
     if (!DATE.test(d.date)) return { error: `Pick a date for Day ${i + 1}.` };
@@ -87,7 +87,7 @@ async function freeTrainers(d: { date: string; start: string; end: string }) {
 
 // Request page: the trainers Growth may pick for each day (only names, never the availability calendar).
 export async function requestTrainerOptions(input: { days: { day_number: number; date: string; start: string; end: string }[] }) {
-  await requireRole("growth", "admin", "approver");
+  await requireAccess("growth.new_deal", "te.assign");
   if (!Array.isArray(input?.days)) return { error: "Add at least one training day." };
   for (const d of input.days) {
     const e = dayError(d);
@@ -98,7 +98,7 @@ export async function requestTrainerOptions(input: { days: { day_number: number;
 
 // Step 3: a one-time URL to upload the proposal straight to storage, under the uploader's own folder.
 export async function createProposalUpload(fileName: string, size: number) {
-  const me = await requireRole("growth", "admin", "approver");
+  const me = await requireAccess("growth.new_deal", "te.assign");
   const bad = proposalFileError(fileName, size);
   if (bad) return { error: bad };
   const path = `${me.id}/${randomUUID()}-${safeName(fileName)}`;
@@ -108,7 +108,7 @@ export async function createProposalUpload(fileName: string, size: number) {
 }
 
 export async function createRequest(input: NewRequest) {
-  const me = await requireRole("growth", "admin", "approver");
+  const me = await requireAccess("growth.new_deal", "te.assign");
   const invalid = requestError(input, { role: me.role, userId: me.id, today: todayISO() });
   if (invalid) return { error: invalid };
   // A picked trainer must still be free and matching when the request is sent.
@@ -239,7 +239,7 @@ export async function createRequest(input: NewRequest) {
 
 // Free, matching trainers for every day of a request (and, for multi-day requests, those free on all days).
 export async function requestCandidates(bookingId: string) {
-  await requireRole("admin", "approver");
+  await requireAccess("te.assign");
   const [b] = await loadBookings([bookingId]);
   if (!b) return { error: "Request not found." };
   // Days that already went by can't be assigned, so a training reassigned partway only asks for the days left.
@@ -266,7 +266,7 @@ async function loadBatch(batchId: string) {
 }
 
 export async function assignTrainer(assignments: { bookingId: string; trainerId: string }[]) {
-  const me = await requireRole("admin", "approver");
+  const me = await requireAccess("te.assign");
   if (!assignments.length) return { error: "Choose a trainer." };
   if (!assignments.every((a) => isUuid(a.bookingId) && isUuid(a.trainerId))) return { error: "Choose a trainer." };
   if (new Set(assignments.map((a) => a.bookingId)).size !== assignments.length) return { error: "Each day can only get one trainer." };
@@ -387,18 +387,19 @@ ${changes.map((c) => `<tr><td style="padding:8px 12px;border-top:1px solid #E1E7
 </table>`;
 }
 
-// Admins and booking managers can change any active training; Growth only their own requests until the trainer confirms.
+// Training Excellence with the access can change (or cancel) any active training; Growth with "Send new deals"
+// only their own requests until the trainer confirms.
 const GROWTH_EDITABLE = ["needs_trainer", "awaiting_trainer"];
-function mayChange(me: { id: string; role: string }, b: BookingRow) {
-  if (me.role === "admin" || me.role === "approver") return true;
-  return me.role === "growth" && GROWTH_EDITABLE.includes(b.status) && b.created_by === me.id;
+function mayChange(me: CurrentUser, b: BookingRow, access: "te.edit" | "te.cancel") {
+  if (can(me, access)) return true;
+  return can(me, "growth.new_deal") && GROWTH_EDITABLE.includes(b.status) && b.created_by === me.id;
 }
 
 export async function editBooking(fd: FormData) {
   const me = await requireRole("admin", "approver", "growth");
   const id = String(fd.get("id"));
   const [b] = await loadBookings([id]);
-  if (!b || !mayChange(me, b)) return { error: "Booking not found." };
+  if (!b || !mayChange(me, b, "te.edit")) return { error: "Booking not found." };
   if (!ACTIVE.includes(b.status)) return { error: "Only active bookings can be edited." };
   const next = {
     program_name: String(fd.get("program_name") ?? "").trim(),
@@ -468,7 +469,7 @@ export async function updateContact(fd: FormData) {
   const me = await requireRole("admin", "approver", "growth");
   const id = String(fd.get("id"));
   const [b] = await loadBookings([id]);
-  if (!b || !(me.role === "admin" || me.role === "approver" || b.created_by === me.id)) return { error: "Booking not found." };
+  if (!b || !(can(me, "te.edit") || (can(me, "growth.new_deal") && b.created_by === me.id))) return { error: "Booking not found." };
   const c = { name: String(fd.get("contact_name") ?? ""), email: String(fd.get("contact_email") ?? ""), mobile: String(fd.get("contact_mobile") ?? "") };
   const ce = contactError(c);
   if (ce) return { error: ce };
@@ -499,7 +500,7 @@ export async function cancelBooking(fd: FormData) {
   const id = String(fd.get("id"));
   const reason = String(fd.get("reason") ?? "").replace(/\r\n/g, "\n").trim();
   const [b] = await loadBookings([id]);
-  if (!b || !mayChange(me, b)) return { error: "Booking not found." };
+  if (!b || !mayChange(me, b, "te.cancel")) return { error: "Booking not found." };
   const r = await cancelDay(me, b, reason);
   if ("error" in r) return r;
   await notifyCancelled(me, [r]);
@@ -640,7 +641,7 @@ export async function materialLink(id: string) {
 // The Meska team only (the content team reads the proposal to write the content); trainers never see the commercial side of a deal.
 // preview opens the file in the browser (PDFs show inline) instead of downloading it.
 export async function proposalLink(dealId: string, preview = false) {
-  await requireRole("admin", "approver", "growth", "content");
+  await requireAccess("te.deal_value", "growth.deal_value", "content.view");
   if (!isUuid(dealId)) return { error: "File not found." };
   const { data } = await db().from("deals").select("proposal_path, proposal_name").eq("id", dealId).maybeSingle();
   const d = data as { proposal_path: string; proposal_name: string } | null;
@@ -670,7 +671,7 @@ function refreshTraining() {
 
 // Takes the trainer off the days still to come. The days go back to "Needs a trainer", ready for assignTrainer.
 export async function reassignTraining(fd: FormData) {
-  const me = await requireRole("admin", "approver");
+  const me = await requireAccess("te.assign");
   const [b] = await loadBookings([String(fd.get("id"))]);
   if (!b) return { error: "Training not found." };
   const today = todayISO();
@@ -727,7 +728,7 @@ export async function reassignTraining(fd: FormData) {
 
 // Cancels what is left of a training. Delivered days, and past days the trainer had confirmed, stay on record.
 export async function cancelTraining(fd: FormData) {
-  const me = await requireRole("admin", "approver");
+  const me = await requireAccess("te.cancel");
   const [b] = await loadBookings([String(fd.get("id"))]);
   if (!b) return { error: "Training not found." };
   const today = todayISO();

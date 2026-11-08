@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { requireRole } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth";
 import { fmtDate } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
 
@@ -9,7 +9,7 @@ type Day = { deal_id: string; program_name: string; day_number: number; date: st
 
 // Every deal Growth sent, newest first, with the ones still waiting for content on top.
 export default async function ContentPage() {
-  await requireRole("content", "admin");
+  await requireAccess("content.view");
   const [deals, days] = await Promise.all([
     fetchAll<Deal>((from, to) => db().from("deals").select("id, company_name, content_submitted_at, created_at").order("created_at", { ascending: false }).range(from, to)),
     fetchAll<Day>((from, to) => db().from("bookings").select("deal_id, program_name, day_number, date").not("deal_id", "is", null).neq("status", "cancelled").order("deal_id").order("day_number").range(from, to)),

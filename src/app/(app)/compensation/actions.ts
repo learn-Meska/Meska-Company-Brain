@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth";
 import { egp, isAssignedTo, parseCompensation, trainingLabel, type CompensationInput } from "@/lib/compensation";
 import { isUuid } from "@/lib/format";
 import { audit, notify, userById } from "@/lib/notify";
@@ -56,7 +56,7 @@ const backTo = (fd: FormData) => {
 };
 
 export async function addCompensation(fd: FormData) {
-  const me = await requireRole("approver", "admin");
+  const me = await requireAccess("te.compensation");
   const parsed = readLine(fd);
   if ("error" in parsed) return parsed;
   const { row } = parsed;
@@ -71,7 +71,7 @@ export async function addCompensation(fd: FormData) {
 }
 
 export async function updateCompensation(fd: FormData) {
-  const me = await requireRole("approver", "admin");
+  const me = await requireAccess("te.compensation");
   const id = str(fd, "id");
   if (!isUuid(id)) return { error: "Line not found." };
   const parsed = readLine(fd);
@@ -94,7 +94,7 @@ export async function updateCompensation(fd: FormData) {
 }
 
 export async function deleteCompensation(fd: FormData) {
-  const me = await requireRole("approver", "admin");
+  const me = await requireAccess("te.compensation");
   const id = str(fd, "id");
   if (!isUuid(id)) return { error: "Line not found." };
   const { data, error } = await db().from("compensation_lines").delete().eq("id", id).select("trainer_id, training, amount, status");

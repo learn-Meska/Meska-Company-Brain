@@ -1,14 +1,20 @@
 import "server-only";
 import { db } from "./supabase";
+import { getsEmails } from "./team-access";
 import { emailLayout, esc, sendEmail, siteUrl, type Attachment, type EmailRow } from "./email";
 import { fmtDate, fmtTime, programVisible, STATUS_LABEL } from "./format";
 
 type Recipient = { id: string; email: string; full_name: string };
 
 // A login can hold several roles, so match on any of them.
+// Everyone with any of these roles who should get the team's messages: company admins always, portal members
+// only with their portal's "Get emails" access (portal admins have it).
 export async function usersWithRoles(...roles: string[]): Promise<Recipient[]> {
-  const { data } = await db().from("app_users").select("id, email, full_name").overlaps("roles", roles);
-  return (data ?? []) as Recipient[];
+  const { data } = await db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").overlaps("roles", roles);
+  type Row = Recipient & { roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
+  return ((data ?? []) as Row[])
+    .filter((u) => roles.some((r) => (u.roles ?? []).includes(r) && getsEmails(u, r)))
+    .map(({ id, email, full_name }) => ({ id, email, full_name }));
 }
 
 export async function userWithRole(id: string | null | undefined, role: string): Promise<Recipient | null> {

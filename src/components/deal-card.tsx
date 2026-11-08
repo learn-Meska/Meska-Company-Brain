@@ -42,7 +42,8 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
 
 // The commercial side of a New deal: value, proposal and the participant list. Meska team only, never trainers.
 // `actions` (e.g. reassign or cancel the training) are shown under the participants.
-export async function DealCard({ dealId, bookingId, actions }: { dealId: string; bookingId: string; actions?: ReactNode }) {
+// showValue: only logins with "See deal value" get the value and the proposal.
+export async function DealCard({ dealId, bookingId, actions, showValue = true }: { dealId: string; bookingId: string; actions?: ReactNode; showValue?: boolean }) {
   const [{ data: deal }, { data: people }, { data: days }] = await Promise.all([
     db().from("deals").select("id, company_name, value_per_day, days, proposal_name, proposal_size").eq("id", dealId).maybeSingle(),
     db().from("deal_participants").select("name, title, department").eq("deal_id", dealId).order("position").range(0, 999),
@@ -70,6 +71,7 @@ export async function DealCard({ dealId, bookingId, actions }: { dealId: string;
           <p className="mt-1 text-sm text-ds-text">Shared by every day of this request. Only the Meska team sees it; trainers don&apos;t.</p>
         </header>
 
+        {showValue && (<>
         <dl className="grid gap-4 @xl:grid-cols-3">
           <Metric icon={<CoinsIcon />} label="Value per day" value={fmtAmount(perDay)} />
           <Metric icon={<CalendarIcon />} label="Days" value={d.days} />
@@ -85,6 +87,7 @@ export async function DealCard({ dealId, bookingId, actions }: { dealId: string;
           </div>
           <ProposalActions dealId={d.id} canPreview={/\.pdf$/i.test(d.proposal_name)} />
         </div>
+        </>)}
       </section>
 
       <section className="ds-card overflow-hidden">

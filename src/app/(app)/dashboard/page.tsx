@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { requireRole } from "@/lib/auth";
+import { requireAccess } from "@/lib/auth";
 import { buildTrainings, CONTENT_LABEL, isStage, STAGE_LABEL, type CycleDay, type CycleDeal, type Stage, type Training } from "@/lib/cycle";
 import { isAudioPath } from "@/lib/files";
 import { fmtDate, fmtTime, isUuid, todayISO } from "@/lib/format";
@@ -12,7 +12,7 @@ const TILES: Stage[] = ["needs_trainer", "waiting_trainer", "scheduled", "in_del
 
 // Every training for every trainer, and where each one stands. Click a training for its details, reassign or cancel.
 export default async function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
-  await requireRole("approver", "admin");
+  await requireAccess("te.dashboard");
   const params = await searchParams;
   const stage = isStage(params.stage) ? params.stage : null;
   const growth = isUuid(params.growth) ? params.growth : "";
