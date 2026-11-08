@@ -6,6 +6,7 @@ import { useRef, useState, useTransition } from "react";
 import { createAudioUpload, createBriefUpload, createMaterialUpload, materialLink, proposalLink, recordAudioFile, recordBriefFile, recordMaterial, respondBooking, submitBrief } from "@/app/(app)/bookings/actions";
 import { contentLink } from "@/app/(app)/content/actions";
 import { AUDIO_MAX_BYTES, checkAudioFile } from "@/lib/files";
+import { DownloadIcon, EyeIcon } from "@/components/icons";
 
 const OFFLINE = { error: "That didn't go through. Check your connection and try again." };
 
@@ -115,6 +116,40 @@ export function DownloadButton({ id, name, kind = "material" }: { id: string; na
       ⬇ {name}
       {err && <span className="ml-2 text-xs text-bad">{err}</span>}
     </button>
+  );
+}
+
+// The proposal's two actions on the deal card: preview (PDF only, opens in a new tab) and download.
+export function ProposalActions({ dealId, canPreview }: { dealId: string; canPreview: boolean }) {
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function open(preview: boolean) {
+    setErr("");
+    setBusy(true);
+    // a blank tab opened during the click, so the browser doesn't block it as a popup
+    const tab = preview ? window.open("", "_blank") : null;
+    const r = await proposalLink(dealId, preview).catch(() => OFFLINE);
+    setBusy(false);
+    if ("url" in r && r.url) {
+      if (tab) tab.location.href = r.url;
+      else window.location.href = r.url;
+    } else {
+      tab?.close();
+      setErr(r.error ?? "Couldn't open the proposal.");
+    }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {err && <span className="text-xs text-bad">{err}</span>}
+      {canPreview && (
+        <button type="button" onClick={() => open(true)} disabled={busy} title="Preview" aria-label="Preview the proposal" className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-surface text-ink transition hover:border-blue hover:text-blue disabled:opacity-50">
+          <EyeIcon size={18} />
+        </button>
+      )}
+      <button type="button" onClick={() => open(false)} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-xl border border-ice2 bg-ice px-4 text-sm font-medium text-royal transition hover:bg-ice2 disabled:opacity-50">
+        <DownloadIcon size={18} /> Download
+      </button>
+    </div>
   );
 }
 

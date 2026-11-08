@@ -638,7 +638,8 @@ export async function materialLink(id: string) {
 /* ---------- Deal proposal ---------- */
 
 // The Meska team only (the content team reads the proposal to write the content); trainers never see the commercial side of a deal.
-export async function proposalLink(dealId: string) {
+// preview opens the file in the browser (PDFs show inline) instead of downloading it.
+export async function proposalLink(dealId: string, preview = false) {
   await requireRole("admin", "approver", "growth", "content");
   if (!isUuid(dealId)) return { error: "File not found." };
   const { data } = await db().from("deals").select("proposal_path, proposal_name").eq("id", dealId).maybeSingle();
@@ -646,7 +647,7 @@ export async function proposalLink(dealId: string) {
   if (!d) return { error: "File not found." };
   const stored = d.proposal_path.split("/").pop()!;
   const name = proposalFileError(d.proposal_name) ? stored : d.proposal_name.replace(/[\x00-\x1f\x7f/\\:*?"<>|]+/g, "_").trim() || stored;
-  const { data: s, error } = await db().storage.from("proposals").createSignedUrl(d.proposal_path, 300, { download: name });
+  const { data: s, error } = await db().storage.from("proposals").createSignedUrl(d.proposal_path, 300, preview === true ? undefined : { download: name });
   if (error) return { error: error.message };
   return { url: s.signedUrl };
 }
