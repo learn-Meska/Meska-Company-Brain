@@ -7,10 +7,10 @@ import { Banner } from "@/components/people-table";
 import { UserAccessForm } from "@/components/user-access-form";
 import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/supabase";
-import { isUuid } from "@/lib/format";
-import { isCategory, TEAM_LABEL, type Category } from "@/lib/team-access";
+import { fmtDateTime, isUuid } from "@/lib/format";
+import { inviteCutoff, isCategory, TEAM_LABEL, type Category } from "@/lib/team-access";
 import { activeLoginIds } from "@/lib/team-invite";
-import { removeFromCategory, removeTeamMember, resendTeamInvite, updateTeamMember } from "../../actions";
+import { cancelAccessInvite, removeFromCategory, removeTeamMember, resendTeamInvite, updateTeamMember } from "../../actions";
 
 type U = { id: string; email: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
 
@@ -20,9 +20,15 @@ const LABEL: Record<Category, string> = { ...TEAM_LABEL, admin: "Company admin" 
 export default async function EditUserPage({ params, searchParams }: PageProps<"/admin/users/[id]">) {
   const me = await requireRole("admin");
   const { id } = await params;
-  const { category: asked, add, saved } = await searchParams;
+  const { category: asked, add, saved, pending, unsent } = await searchParams;
   if (!isUuid(id)) notFound();
-  const [{ data }, active] = await Promise.all([db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle(), activeLoginIds()]);
+  const since = inviteCutoff();
+  const [{ data }, active, { data: invites }] = await Promise.all([
+    db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle(),
+    activeLoginIds(),
+    db().from("access_invites").select("category, created_at").eq("user_id", id).is("accepted_at", null).gte("created_at", since).order("created_at"),
+  ]);
+  const waiting = ((invites ?? []) as { category: string; created_at: string }[]).filter((i) => isCategory(i.category)) as { category: Category; created_at: string }[];
   const u = data as U | null;
   if (!u || !(u.roles ?? []).length) notFound();
 
@@ -36,6 +42,25 @@ export default async function EditUserPage({ params, searchParams }: PageProps<"
       <Link href="/admin/users" className="text-sm text-blue hover:underline">← Team &amp; access</Link>
       <PageHeader kicker={active.has(u.id) ? "Active" : "Invited"} title={u.full_name} lead={u.email} />
       {saved && <Banner>Access saved.</Banner>}
+      {typeof pending === "string" && <Banner>A confirmation email was sent. They get <b>{typeof asked === "string" ? asked : "the new access"}</b> once they confirm it.</Banner>}
+      {typeof unsent === "string" && <Banner tone="warn">The confirmation was saved, but the email to <b>{unsent}</b> couldn&apos;t be sent. Add the category again to resend it.</Banner>}
+      {waiting.length > 0 && (
+        <section className="ds-card divide-y divide-ds-border overflow-hidden">
+          {waiting.map((w) => (
+            <div key={w.category} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+              <p className="text-sm text-ds-heading">
+                <span className="badge mr-2 bg-warn-bg text-warn">Waiting for confirmation</span>
+                <b>{LABEL[w.category]}</b> <span className="text-ds-text">· sent {fmtDateTime(w.created_at)}</span>
+              </p>
+              <Form action={cancelAccessInvite}>
+                <input type="hidden" name="id" value={u.id} />
+                <input type="hidden" name="category" value={w.category} />
+                <Submit className="btn-quiet btn-sm text-bad" pending="Cancelling…">Cancel</Submit>
+              </Form>
+            </div>
+          ))}
+        </section>
+      )}
 
       <nav className="flex flex-wrap items-center gap-2" aria-label="Categories">
         {held.map((c) => (

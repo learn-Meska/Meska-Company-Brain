@@ -7,7 +7,8 @@ import { db } from "@/lib/supabase";
 import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
 import { isUuid } from "@/lib/format";
 import { hasUnprintable } from "@/lib/pdf-text";
-import { ensureAuthUser, rolesText, sendInvite, sendTeamAdded, STAFF_ROLES } from "@/lib/team-invite";
+import { ensureAuthUser, rolesText, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
+import { sendAccessInvite } from "@/lib/access-invite";
 import { applyCategory, cleanPermissions, dropCategory, isCategory, TEAM_LABEL, type Category } from "@/lib/team-access";
 import { audit } from "@/lib/notify";
 
@@ -192,6 +193,25 @@ function accessError(category: Category, picked: string[], portalAdmin: boolean)
   return cleanPermissions([category], picked).length ? null : "Turn on at least one access, or make them portal admin.";
 }
 
+async function signsIn(id: string) {
+  const { data } = await db().auth.admin.getUserById(id);
+  return !!data?.user?.last_sign_in_at;
+}
+
+// Emails a confirmation link for a new category; the access is added only once they confirm.
+async function askToConfirm(me: { id: string; full_name: string }, user: { id: string; email: string; full_name: string }, category: Category, picked: string[], portalAdmin: boolean, back = "/admin/users") {
+  let sent = true;
+  try {
+    sent = await sendAccessInvite({ user, category, portalAdmin, picked, by: me });
+  } catch (e) {
+    console.error("[askToConfirm]", e instanceof Error ? e.message : e);
+    return { error: "Couldn't create the confirmation. Please try again." };
+  }
+  await audit(me.id, "access_invited", null, { id: user.id, category, portal_admin: portalAdmin });
+  revalidatePath("/admin/users");
+  redirect(`${back}?${new URLSearchParams({ pending: user.full_name, category: CATEGORY_TEXT[category], ...(sent ? {} : { unsent: user.email }) })}`);
+}
+
 // Create user: one category and its accesses, then the set-your-password email.
 export async function addTeamMember(fd: FormData) {
   const me = await requireRole("admin");
@@ -208,25 +228,11 @@ export async function addTeamMember(fd: FormData) {
   if (bad) return { error: bad };
   const { data: existing } = await db().from("app_users").select("id, full_name, roles, team_admin_of, permissions").eq("email", email).maybeSingle();
   const cur = existing as (AccessRow & { id: string; full_name: string }) | null;
-  // Someone already on the team (a company admin included) simply gets this category too; nothing else changes.
-  if (cur && isStaffRoles(cur.roles ?? [])) {
+  // Someone who already has a login (a company admin, another portal's member, a trainer who signs in) must
+  // confirm the new category from an email before it's added. Yourself included.
+  if (cur && (isStaffRoles(cur.roles ?? []) || (await signsIn(cur.id)))) {
     if ((cur.roles ?? []).includes(category)) return { error: `They already have ${CATEGORY_TEXT[category]}. Open them in the list to change their access.` };
-    const next = applyCategory(accessOf(cur), category, picked, portalAdmin);
-    const { error } = await db().from("app_users").update({ role: mainRole(next.roles), ...next }).eq("id", cur.id);
-    if (error) return failed("addTeamMember", error);
-    await audit(me.id, "team_admin_changed", null, { id: cur.id, added_category: category, portal_admin: portalAdmin, access: next.permissions });
-    let told = true;
-    // They already sign in, so no set-password link (and none to yourself).
-    if (cur.id !== me.id) {
-      try {
-        await sendTeamAdded(email, cur.full_name, CATEGORY_TEXT[category]);
-      } catch (e) {
-        console.error("[addTeamMember notice]", e instanceof Error ? e.message : e);
-        told = false;
-      }
-    }
-    revalidatePath("/admin/users");
-    redirect(`/admin/users?${new URLSearchParams({ extended: cur.full_name, category: CATEGORY_TEXT[category], ...(told ? {} : { unsent: email }) })}`);
+    return askToConfirm(me, { id: cur.id, email, full_name: cur.full_name }, category, picked, portalAdmin);
   }
   let sent = true;
   try {
@@ -265,9 +271,12 @@ export async function updateTeamMember(fd: FormData) {
   const portalAdmin = isPortalAdmin(fd);
   const bad = accessError(category, picked, portalAdmin);
   if (bad) return { error: bad };
-  const { data } = await db().from("app_users").select("roles, team_admin_of, permissions").eq("id", id).maybeSingle();
+  const { data } = await db().from("app_users").select("email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle();
   if (!data) return { error: "Member not found." };
-  const next = applyCategory(accessOf(data as AccessRow), category, picked, portalAdmin);
+  const row = data as AccessRow & { email: string; full_name: string };
+  // A category they don't have yet must be confirmed by them first; changing an existing one applies now.
+  if (!(row.roles ?? []).includes(category)) return askToConfirm(me, { id, email: row.email, full_name: row.full_name }, category, picked, portalAdmin, `/admin/users/${id}`);
+  const next = applyCategory(accessOf(row), category, picked, portalAdmin);
   const { error } = await db().from("app_users").update({ role: mainRole(next.roles), ...next }).eq("id", id);
   if (error) return failed("updateTeamMember", error);
   await audit(me.id, "team_admin_changed", null, { id, category, portal_admin: portalAdmin, access: next.permissions });
@@ -659,4 +668,17 @@ export async function importFeedback(fd: FormData) {
   await audit(me.id, "feedback_imported", null, { sessions: rows.length });
   revalidatePath("/admin/feedback");
   return { ok: `Imported ${rows.length} sessions. Feedback scores are updated on every trainer profile.` };
+}
+
+// Withdraws an access confirmation that hasn't been accepted yet.
+export async function cancelAccessInvite(fd: FormData) {
+  const me = await requireRole("admin");
+  const id = str(fd, "id");
+  const category = str(fd, "category");
+  if (!isUuid(id) || !isCategory(category)) return { error: "Not found." };
+  const { error } = await db().from("access_invites").delete().eq("user_id", id).eq("category", category).is("accepted_at", null);
+  if (error) return failed("cancelAccessInvite", error);
+  await audit(me.id, "team_admin_changed", null, { id, cancelled_invite: category });
+  revalidatePath("/admin/users");
+  redirect(`/admin/users/${id}?saved=1`);
 }

@@ -7,7 +7,8 @@ import { db } from "@/lib/supabase";
 import { isUuid } from "@/lib/format";
 import { audit } from "@/lib/notify";
 import { applyCategory, cleanPermissions, ledTeam, memberChangeError, TEAM_LABEL, withoutTeam, type Team } from "@/lib/team-access";
-import { ensureAuthUser, sendInvite, sendTeamAdded, STAFF_ROLES } from "@/lib/team-invite";
+import { ensureAuthUser, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
+import { sendAccessInvite } from "@/lib/access-invite";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -56,13 +57,26 @@ export async function addToMyTeam(fd: FormData) {
   const cur = existing as { id: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null } | null;
   const held = cur?.roles ?? [];
   if (held.includes(team)) return { error: `That person is already in ${label}.` };
-  // Someone already on another team keeps their access and simply gets this team too.
+  // Someone who already has a login must confirm joining this team from an email; nothing changes until then.
   const alreadyStaff = held.some((r) => (STAFF_ROLES as readonly string[]).includes(r));
+  if (cur) {
+    const { data: authUser } = await db().auth.admin.getUserById(cur.id);
+    if (alreadyStaff || authUser?.user?.last_sign_in_at) {
+      let told = true;
+      try {
+        told = await sendAccessInvite({ user: { id: cur.id, email, full_name: cur.full_name }, category: team, portalAdmin, picked, by: me });
+      } catch (e) {
+        console.error("[addToMyTeam invite]", e instanceof Error ? e.message : e);
+        return { error: "Couldn't send the confirmation. Please try again." };
+      }
+      await audit(me.id, "access_invited", null, { id: cur.id, category: team, portal_admin: portalAdmin, by_portal_admin: true });
+      refresh();
+      redirect(`/team?${new URLSearchParams(told ? { pending: cur.full_name } : { unsent: email })}`);
+    }
+  }
   let sent = true;
   try {
     const { id } = await ensureAuthUser(email);
-    const { data: authUser } = await db().auth.admin.getUserById(id);
-    const signsIn = alreadyStaff || !!authUser?.user?.last_sign_in_at;
     // A previously removed member was blocked from signing in; adding them back lifts that.
     await db().auth.admin.updateUserById(id, { ban_duration: "none" });
     const next = applyCategory(accessOf(cur), team, picked, portalAdmin);
@@ -75,8 +89,7 @@ export async function addToMyTeam(fd: FormData) {
     }
     await audit(me.id, "team_member_added", null, { email, category: team, portal_admin: portalAdmin, access: next.permissions, by_portal_admin: true });
     try {
-      if (signsIn) await sendTeamAdded(email, cur?.full_name ?? full_name, label);
-      else await sendInvite(email, full_name, label);
+      await sendInvite(email, full_name, label);
     } catch (e) {
       console.error("[addToMyTeam email]", e instanceof Error ? e.message : e);
       sent = false;

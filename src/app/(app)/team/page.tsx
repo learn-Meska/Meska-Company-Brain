@@ -15,7 +15,7 @@ export default async function MyTeamPage({ searchParams }: PageProps<"/team">) {
   const me = await requireUser();
   const team = ledTeam(me);
   if (!team) redirect("/");
-  const { added, unsent, removed } = await searchParams;
+  const { added, unsent, removed, pending } = await searchParams;
   const label = TEAM_LABEL[team];
   const [{ data }, active] = await Promise.all([
     db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").contains("roles", [team]).order("full_name"),
@@ -36,6 +36,7 @@ export default async function MyTeamPage({ searchParams }: PageProps<"/team">) {
         }
       />
       {typeof added === "string" && <Banner>Member added. An email was sent to <b>{added}</b>.</Banner>}
+      {typeof pending === "string" && <Banner><b>{pending}</b> already has an account, so they were emailed to confirm joining {label}. They appear here once they confirm.</Banner>}
       {typeof unsent === "string" && <Banner tone="warn">Member added, but the email to <b>{unsent}</b> couldn&apos;t be sent. Open them and use “Resend invite”.</Banner>}
       {removed && <Banner>Removed from {label}.</Banner>}
 
