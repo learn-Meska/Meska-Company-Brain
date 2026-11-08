@@ -1,9 +1,13 @@
-import { BriefBox, DownloadButton, MaterialUploader } from "@/components/booking-ui";
+import { DownloadButton, MaterialUploader } from "@/components/booking-ui";
+import { DeliveryDialog } from "@/components/delivery-dialog";
+import { FeedbackResults } from "@/components/feedback-results";
+import { DeliveryReportCard } from "@/components/delivery-report";
+import { asDeliveryReport } from "@/lib/delivery";
 import { StatusBadge } from "@/components/status";
 import { db } from "@/lib/supabase";
+import { feedbackAlwaysOpen, takesFeedback } from "@/lib/feedback-mode";
 import { feedbackWindow, isPast, fmtDate, fmtDateTime, fmtTime, programVisible, SLOT_LABEL } from "@/lib/format";
 import { bookingFeedback } from "@/lib/feedback";
-import { fmtNps } from "@/lib/survey";
 import { googleCalendarUrl } from "@/lib/ics";
 import { siteUrl } from "@/lib/email";
 import type { BookingRow } from "@/lib/notify";
@@ -25,9 +29,11 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
   const hideProgram = trainerView && !programVisible(b);
   const cairoToday = new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
   const briefOpen = b.status === "confirmed" && b.date <= cairoToday;
-  const fb = b.status === "confirmed" ? await bookingFeedback(b.id) : null;
   const win = feedbackWindow(b);
-  const feedbackClosed = isPast(win.closes);
+  const alwaysOpen = await feedbackAlwaysOpen();
+  const qr = takesFeedback(b.status, alwaysOpen);
+  const fb = qr ? await bookingFeedback(b.id) : null;
+  const feedbackClosed = !alwaysOpen && isPast(win.closes);
   const feedbackUrl = `${siteUrl()}/f/${b.feedback_token}`;
   const closeLabel = win.closes.toLocaleString("en-GB", { timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
   const rows: [string, React.ReactNode][] = [
@@ -78,7 +84,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
           <StatusBadge status={b.status} />
         </div>
       </div>
-      {(trainerView && ["awaiting_trainer", "confirmed"].includes(b.status)) || b.status === "confirmed" ? (
+      {(trainerView && ["awaiting_trainer", "confirmed"].includes(b.status)) || qr ? (
         <div className="flex flex-wrap gap-2">
           {trainerView && ["awaiting_trainer", "confirmed"].includes(b.status) && (
             <>
@@ -86,7 +92,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
               <a href={googleCalendarUrl(b, `${siteUrl()}/me/bookings/${b.id}`)} target="_blank" rel="noopener" className="btn-ghost btn-sm">Google Calendar ↗</a>
             </>
           )}
-          {b.status === "confirmed" && <a href={`/bookings/${b.id}/qr`} className="btn btn-sm">⬇ Feedback QR code</a>}
+          {qr && <a href={`/bookings/${b.id}/qr`} className="btn btn-sm">⬇ Feedback QR code</a>}
         </div>
       ) : null}
       <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
@@ -164,73 +170,65 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
         )}
       </div>
       {(trainerView ? briefOpen : b.status === "confirmed") && (
-        <div className="rounded-2xl border border-ice2 bg-ice p-4">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="h2">{trainerView && !b.finished_at ? "Mark this training as delivered" : "Brief and audio"}</h2>
-            {b.brief_submitted_at && <span className="badge bg-good-bg text-good">Submitted {fmtDateTime(b.brief_submitted_at)}</span>}
-          </div>
-          {trainerView ? (
-            <BriefBox bookingId={b.id} initial={b.brief ?? ""} submittedAt={b.brief_submitted_at} finished={!!b.finished_at} hasAudio={briefFiles.some((m) => isAudioPath(m.file_path))} />
-          ) : b.brief || briefFiles.length ? (
-            b.brief && <p className="whitespace-pre-wrap text-sm leading-relaxed">{b.brief}</p>
-          ) : (
-            <p className="text-sm text-muted">{briefOpen ? "The trainer hasn't sent the brief yet." : "The trainer can add a brief once the training day starts."}</p>
-          )}
-          {briefFiles.length > 0 && (
-            <ul className="mt-3 space-y-1.5">
-              {briefFiles.map((m) => (
-                <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface px-3 py-2">
-                  <DownloadButton id={m.id} name={m.file_name} />
-                  <span className="text-xs text-muted">{isAudioPath(m.file_path) ? "Audio · " : ""}{fmtDateTime(m.created_at)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      {fb && (!trainerView || feedbackClosed) && (
-        <div className="rounded-2xl border border-line p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="h2">Participant feedback</h2>
-            <span className="text-xs text-muted">{feedbackClosed ? "Closed" : `Open until ${closeLabel}`} · {fb.count} {fb.count === 1 ? "response" : "responses"}</span>
-          </div>
-          {!trainerView && !feedbackClosed && (
-            <p className="mb-3 break-all text-xs text-muted">
-              Form link: <a href={feedbackUrl} target="_blank" className="text-blue hover:underline">{feedbackUrl}</a>
-            </p>
-          )}
-          {fb.count === 0 ? (
-            <p className="text-sm text-muted">No feedback yet. Share the QR code with participants at the end of the session.</p>
-          ) : (
-            <>
-              <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="stat-hot rounded-xl p-3 text-white">
-                  <div className="text-2xl font-semibold tabular-nums">{fmtNps(fb.nps)}</div>
-                  <div className="text-[10.5px] uppercase tracking-wider text-[#93C5FD]">NPS (−100 to 100)</div>
-                  <div className="mt-1 text-[11px] text-[#C7D7F5]">
-                    {fb.promoters} promoters · {fb.passives} passives · {fb.detractors} detractors
-                  </div>
-                </div>
-                {fb.yes.map((q) => (
-                  <div key={q.key} className="rounded-xl border border-ice2 bg-ice p-3">
-                    <div className="text-2xl font-bold tabular-nums text-royal-deep">{q.percent != null ? `${q.percent}%` : "—"}</div>
-                    <div className="text-[10.5px] font-medium uppercase tracking-wider text-[#3B82F6]">Yes · {q.short}</div>
-                  </div>
-                ))}
-              </div>
-              <div className="mb-1.5 inline-block rounded-full bg-surface2 px-2.5 py-0.5 text-xs font-semibold text-ink">Main reason for their score</div>
-              {fb.reasons.length ? (
-                <ul className="space-y-1.5 text-sm">
-                  {fb.reasons.map((c, i) => (
-                    <li key={i} className="rounded-lg bg-surface2 px-3 py-2">“{c}”</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-faint">No comments.</p>
+        <section className="ds-card overflow-hidden">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ds-border px-5 py-4">
+            <div>
+              <h2 className="text-base font-semibold text-ds-heading">Delivery report</h2>
+              <p className="text-sm text-ds-text">
+                {b.finished_at
+                  ? `Day ${b.day_number} was marked as delivered.`
+                  : trainerView
+                    ? "When the day is done, mark it as delivered with a short report and the audio."
+                    : briefOpen
+                      ? "The trainer hasn't marked this day as delivered yet."
+                      : "The trainer can send the report once the training day starts."}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {b.finished_at && <span className="badge bg-good-bg text-good">Delivered</span>}
+              {trainerView && (
+                <DeliveryDialog
+                  bookingId={b.id}
+                  dayNumber={b.day_number}
+                  expected={deal?.participants || null}
+                  report={asDeliveryReport(b.delivery_report)}
+                  brief={b.brief ?? ""}
+                  finished={!!b.finished_at}
+                  files={briefFiles.map((m) => ({ id: m.id, file_name: m.file_name, audio: isAudioPath(m.file_path) }))}
+                />
               )}
-            </>
+            </div>
+          </header>
+          {(b.finished_at || b.brief || briefFiles.length > 0) && (
+            <div className="p-5">
+              <DeliveryReportCard
+                report={b.delivery_report}
+                brief={b.brief}
+                submittedAt={b.brief_submitted_at}
+                expected={deal?.participants || null}
+                files={briefFiles.map((m) => ({ id: m.id, file_name: m.file_name, audio: isAudioPath(m.file_path) }))}
+              />
+            </div>
           )}
-        </div>
+        </section>
+      )}
+      {fb && (
+        <section className="ds-card overflow-hidden">
+          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-ds-border px-5 py-4">
+            <h2 className="text-base font-semibold text-ds-heading">Participant feedback</h2>
+            <span className="text-xs text-ds-text">
+              {feedbackClosed ? "Closed" : alwaysOpen ? "Open any time" : `Open until ${closeLabel}`} · {fb.count} {fb.count === 1 ? "response" : "responses"}
+            </span>
+          </header>
+          <div className="space-y-4 p-5">
+            {!feedbackClosed && (
+              <p className="break-all text-xs text-ds-text">
+                Form link: <a href={feedbackUrl} target="_blank" className="text-blue hover:underline">{feedbackUrl}</a>
+              </p>
+            )}
+            {fb.count === 0 ? <p className="text-sm text-ds-text">No feedback yet. Share the QR code with participants at the end of the session.</p> : <FeedbackResults fb={fb} />}
+          </div>
+        </section>
       )}
     </section>
   );

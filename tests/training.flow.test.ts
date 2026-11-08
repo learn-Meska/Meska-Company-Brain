@@ -183,31 +183,39 @@ describe("marking a day as delivered", () => {
     h.fake.tables.bookings = [day(TODAY_DAY, 1, { date: PAST })];
   });
 
+  const report = (over: Record<string, string> = {}) => ({ attended: "18", topics: "Prompting basics", engagement: "4", challenges: "", follow_up: "", brief: "It went well.", ...over });
   it("needs the audio", async () => {
-    expect(await submitBrief(TODAY_DAY, "It went well.")).toEqual({ error: expect.stringMatching(/audio is required/) });
+    expect(await submitBrief(TODAY_DAY, report())).toEqual({ error: expect.stringMatching(/audio is required/) });
     expect(row(TODAY_DAY).finished_at).toBeNull();
   });
-  it("needs the brief, and audio alone doesn't count as one", async () => {
+  it("needs the delivery report: attendance, topics and engagement", async () => {
     await addAudio();
-    expect(await submitBrief(TODAY_DAY, "  ")).toEqual({ error: expect.stringMatching(/brief is required/) });
+    expect(await submitBrief(TODAY_DAY, report({ attended: "" }))).toEqual({ error: expect.stringMatching(/attended/) });
+    expect(await submitBrief(TODAY_DAY, report({ topics: "  " }))).toEqual({ error: expect.stringMatching(/topics/) });
+    expect(await submitBrief(TODAY_DAY, report({ engagement: "0" }))).toEqual({ error: expect.stringMatching(/engagement/) });
     expect(row(TODAY_DAY).finished_at).toBeNull();
   });
   it("delivered with both, and the team is told", async () => {
     expect(await addAudio()).toEqual({ ok: "Added session.mp3." });
-    expect(await submitBrief(TODAY_DAY, "It went well.")).toEqual({ ok: expect.stringMatching(/marked as delivered/) });
-    expect(row(TODAY_DAY)).toMatchObject({ brief: "It went well.", finished_at: expect.any(String), brief_submitted_at: expect.any(String) });
+    expect(await submitBrief(TODAY_DAY, report())).toEqual({ ok: expect.stringMatching(/Marked as delivered/) });
+    expect(row(TODAY_DAY)).toMatchObject({
+      brief: "It went well.",
+      delivery_report: { attended: 18, topics: "Prompting basics", engagement: 4, challenges: "", follow_up: "" },
+      finished_at: expect.any(String),
+      brief_submitted_at: expect.any(String),
+    });
     expect(h.notified).toContainEqual({ to: ["admin@meska.ai", "content@meska.ai", "growth@meska.ai"], title: "Training delivered: AI in HR — Day 1" });
     expect(h.audits).toEqual(["audio_uploaded", "brief_submitted"]);
   });
-  it("a brief document with audio is enough", async () => {
+  it("notes are optional once the report and audio are there", async () => {
     await addAudio();
     const path = `${TODAY_DAY}/brief-1-notes.pdf`;
     await recordBriefFile(TODAY_DAY, path, "notes.pdf", 10);
-    expect(await submitBrief(TODAY_DAY, "")).toEqual({ ok: expect.stringMatching(/marked as delivered/) });
+    expect(await submitBrief(TODAY_DAY, report({ brief: "" }))).toEqual({ ok: expect.stringMatching(/Marked as delivered/) });
   });
-  it("a day delivered before audio was required can still update its brief", async () => {
+  it("a day delivered before audio was required can still update its report", async () => {
     h.fake.tables.bookings = [day(TODAY_DAY, 1, { date: PAST, finished_at: "2001-01-10T18:00:00Z" })];
-    expect(await submitBrief(TODAY_DAY, "Updated.")).toEqual({ ok: expect.stringMatching(/Brief updated/) });
+    expect(await submitBrief(TODAY_DAY, report({ brief: "Updated." }))).toEqual({ ok: expect.stringMatching(/Report updated/) });
   });
   it("audio must be an audio file under this day's own folder", async () => {
     expect(await createAudioUpload(TODAY_DAY, "session.pdf")).toEqual({ error: expect.stringMatching(/MP3/) });

@@ -4,6 +4,7 @@ import { ActionCard } from "@/components/action-card";
 import { AssignPanel } from "@/components/assign-panel";
 import { DownloadButton } from "@/components/booking-ui";
 import { DealCard } from "@/components/deal-card";
+import { DeliveryReportCard } from "@/components/delivery-report";
 import { DeleteTraining } from "@/components/delete-training";
 import { Form, Submit } from "@/components/form";
 import { SwapIcon, TrashIcon } from "@/components/icons";
@@ -163,21 +164,17 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
 
       <section className="card space-y-3">
         <h2 className="h2">Delivery reports</h2>
-        {reports.length === 0 && <p className="text-sm text-muted">Nothing yet. The trainer adds the brief and the audio when marking a day as delivered.</p>}
+        {reports.length === 0 && <p className="text-sm text-muted">Nothing yet. The trainer sends a delivery report and the audio when marking a day as delivered.</p>}
         {reports.map((d) => (
           <div key={d.id} className="rounded-2xl border border-ice2 bg-ice p-4">
             <h3 className="mb-1 text-sm font-semibold">Day {d.day_number}{d.trainers?.full_name ? ` · ${d.trainers.full_name}` : ""}</h3>
-            {d.brief ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{d.brief}</p> : <p className="text-sm text-muted">No written brief.</p>}
-            {files.some((m) => m.booking_id === d.id) && (
-              <ul className="mt-3 space-y-1.5">
-                {files.filter((m) => m.booking_id === d.id).map((m) => (
-                  <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface px-3 py-2">
-                    <DownloadButton id={m.id} name={m.file_name} />
-                    <span className="text-xs text-muted">{isAudioPath(m.file_path) ? "Audio" : "Brief document"} · {fmtDateTime(m.created_at)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <DeliveryReportCard
+              report={d.delivery_report}
+              brief={d.brief}
+              submittedAt={d.brief_submitted_at}
+              expected={dealInfo?.participants || null}
+              files={files.filter((m) => m.booking_id === d.id).map((m) => ({ id: m.id, file_name: m.file_name, audio: isAudioPath(m.file_path) }))}
+            />
           </div>
         ))}
       </section>

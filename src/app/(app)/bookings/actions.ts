@@ -14,6 +14,7 @@ import { getSetting } from "@/lib/scoring";
 import { checkAudioFile, checkFile, isAudioPath, safeName } from "@/lib/files";
 import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, type BookingRow } from "@/lib/notify";
 import { trainingTeam } from "@/lib/team";
+import { ENGAGEMENT_LABEL, readDeliveryReport, type DeliveryInput } from "@/lib/delivery";
 import {
   contactError,
   contactFields,
@@ -826,39 +827,55 @@ export async function recordAudioFile(bookingId: string, path: string, fileName:
   return { ok: `Added ${fileName}.` };
 }
 
-export async function submitBrief(bookingId: string, text: string) {
+// The trainer marks a day as delivered with the delivery report (attendance, topics, engagement, challenges,
+// follow-up), optional notes and documents, and the required audio. Sending it again updates the report.
+export async function submitBrief(bookingId: string, input: DeliveryInput) {
   const r = await ownConfirmedPast(bookingId);
   if ("error" in r) return { error: r.error };
-  const brief = text.replace(/\r\n/g, "\n").trim();
+  const read = readDeliveryReport(input ?? {});
+  if ("error" in read) return { error: read.error };
+  const { report, brief } = read;
   const { data: attached } = await db().from("booking_materials").select("file_path").eq("booking_id", bookingId).eq("kind", "brief");
   const paths = ((attached ?? []) as { file_path: string }[]).map((m) => m.file_path);
   const audioCount = paths.filter(isAudioPath).length;
   const count = paths.length - audioCount;
-  if (!brief && !count) return { error: "The brief is required: write it or attach a document before marking the training as delivered." };
   const first = !r.b.finished_at;
-  // Days delivered before audio was required can still update their brief without it.
+  // Days delivered before audio was required can still update their report without it.
   if (first && !audioCount) return { error: "The training audio is required: add it before marking the training as delivered." };
   const now = new Date().toISOString();
-  // Submitting the brief and audio is what marks the training day as delivered (finished_at).
-  const { error } = await db().from("bookings").update({ brief: brief || null, brief_submitted_at: now, finished_at: r.b.finished_at ?? now }).eq("id", bookingId);
+  // Submitting the report and audio is what marks the training day as delivered (finished_at).
+  const { error } = await db()
+    .from("bookings")
+    .update({ brief: brief || null, delivery_report: report, brief_submitted_at: now, finished_at: r.b.finished_at ?? now })
+    .eq("id", bookingId);
   if (error) return { error: friendlyError(error.message) };
-  await audit(r.me.id, "brief_submitted", bookingId, { program: title(r.b) });
+  await audit(r.me.id, "brief_submitted", bookingId, { program: title(r.b), attended: report.attended, engagement: report.engagement });
+  const label = first ? "Training delivered" : "Delivery report updated";
   await notify(await trainingTeam(r.b, r.me.id), {
-    title: `${first ? "Training delivered" : "Brief updated"}: ${title(r.b)}`,
-    body: `${r.me.full_name}${brief ? `: ${brief.slice(0, 140)}${brief.length > 140 ? "…" : ""}` : " attached a document."}`,
+    title: `${label}: ${title(r.b)}`,
+    body: `${r.me.full_name} · ${report.attended} attended · engagement ${report.engagement}/5`,
     link: `/dashboard/${bookingId}`,
     email: {
-      subject: `${first ? "Training delivered" : "Brief updated"}: ${title(r.b)}`,
-      intro: `<b>${esc(r.me.full_name)}</b> ${first ? "marked this training as delivered and added the brief and audio" : "updated the brief"}.`,
-      rows: [...bookingRows(r.b), ...(count ? [["Attachments", `${count} document${count > 1 ? "s" : ""}`] as [string, string]] : []), ...(audioCount ? [["Audio", `${audioCount} file${audioCount > 1 ? "s" : ""}`] as [string, string]] : [])],
+      subject: `${label}: ${title(r.b)}`,
+      intro: `<b>${esc(r.me.full_name)}</b> ${first ? "marked this training day as delivered and sent the delivery report" : "updated the delivery report"}.`,
+      rows: [
+        ...bookingRows(r.b),
+        ["Attended", String(report.attended)],
+        ["Engagement", `${report.engagement}/5 · ${ENGAGEMENT_LABEL[report.engagement]}`],
+        ["Topics covered", esc(report.topics).replace(/\n/g, "<br>")],
+        ...(report.challenges ? [["Challenges", esc(report.challenges).replace(/\n/g, "<br>")] as [string, string]] : []),
+        ...(report.follow_up ? [["Follow-up", esc(report.follow_up).replace(/\n/g, "<br>")] as [string, string]] : []),
+        ...(count ? [["Documents", `${count} file${count > 1 ? "s" : ""}`] as [string, string]] : []),
+        ...(audioCount ? [["Audio", `${audioCount} file${audioCount > 1 ? "s" : ""}`] as [string, string]] : []),
+      ],
       content: brief || undefined,
-      button: "Read the brief",
+      button: "Read the report",
     },
   });
   revalidatePath(`/me/bookings/${bookingId}`);
   revalidatePath(`/bookings/${bookingId}`);
   revalidatePath("/dashboard", "layout");
-  return { ok: first ? "Training marked as delivered. Thank you, your brief and audio were sent to the team." : "Brief updated and the team was notified." };
+  return { ok: first ? "Marked as delivered. Thank you, your report and audio were sent to the team." : "Report updated and the team was notified." };
 }
 
 /* ---------- Delete a whole training (company admins) ---------- */
