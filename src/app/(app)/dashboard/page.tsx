@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { requireAccess } from "@/lib/auth";
-import { buildTrainings, CONTENT_LABEL, isStage, STAGE_LABEL, type CycleDay, type CycleDeal, type Stage, type Training } from "@/lib/cycle";
+import { buildTrainings, CONFIRMATION_FILTERS, CONTENT_LABEL, confirmationFilter, isConfirmationFilter, isContentFilter, isStage, STAGE_LABEL, type CycleDay, type CycleDeal, type Stage, type Training } from "@/lib/cycle";
 import { isAudioPath } from "@/lib/files";
 import { fmtDate, fmtTime, isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
@@ -17,6 +17,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   const stage = isStage(params.stage) ? params.stage : null;
   const growth = isUuid(params.growth) ? params.growth : "";
   const trainer = isUuid(params.trainer) ? params.trainer : "";
+  const confirmation = isConfirmationFilter(params.confirmation) ? params.confirmation : "";
+  const content = isContentFilter(params.content) ? params.content : "";
 
   const [days, deals, files, feedback, audio, users] = await Promise.all([
     fetchAll<CycleDay>((from, to) => db().from("bookings").select("id, deal_id, batch_id, program_name, day_number, date, start_time, end_time, status, trainer_id, created_by, created_at, trainer_comment, trainer_responded_at, finished_at, brief_submitted_at, trainers(full_name), industry:lookups!bookings_industry_id_fkey(name)").order("id").range(from, to)),
@@ -56,11 +58,17 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   const byName = (a: [string, string], b: [string, string]) => a[1].localeCompare(b[1]);
 
   // Each training has one status, so the status tiles always add up to "All trainings".
-  const scoped = trainings.filter((t) => (!growth || t.requestedBy === growth) && (!trainer || t.trainers.some((x) => x.id === trainer)));
+  const scoped = trainings.filter(
+    (t) =>
+      (!growth || t.requestedBy === growth) &&
+      (!trainer || t.trainers.some((x) => x.id === trainer)) &&
+      (!confirmation || confirmationFilter(t.confirmation) === confirmation) &&
+      (!content || t.content === content),
+  );
   const rows = stage ? scoped.filter((t) => t.stage === stage) : scoped;
 
   const link = (p: Record<string, string>) => {
-    const q = new URLSearchParams({ ...(growth ? { growth } : {}), ...(trainer ? { trainer } : {}), ...p }).toString();
+    const q = new URLSearchParams({ ...(growth ? { growth } : {}), ...(trainer ? { trainer } : {}), ...(confirmation ? { confirmation } : {}), ...(content ? { content } : {}), ...p }).toString();
     return q ? `/dashboard?${q}` : "/dashboard";
   };
   const tile = (key: Stage | null, label: string, n: number) => (
@@ -80,7 +88,6 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
       </div>
 
       <form className="flex flex-wrap items-center gap-2" action="/dashboard">
-        {stage && <input type="hidden" name="stage" value={stage} />}
         <select name="growth" defaultValue={growth} className="input w-44 py-1.5" aria-label="Growth lead">
           <option value="">All Growth leads</option>
           {[...requesters.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
@@ -89,8 +96,20 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
           <option value="">All trainers</option>
           {[...trainerOptions.entries()].sort(byName).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
+        <select name="confirmation" defaultValue={confirmation} className="input w-48 py-1.5" aria-label="Trainer confirmation">
+          <option value="">Any confirmation</option>
+          {Object.entries(CONFIRMATION_FILTERS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select name="content" defaultValue={content} className="input w-40 py-1.5" aria-label="Content">
+          <option value="">Any content</option>
+          {Object.entries(CONTENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select name="stage" defaultValue={stage ?? ""} className="input w-44 py-1.5" aria-label="Training status">
+          <option value="">Any training status</option>
+          {TILES.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+        </select>
         <button className="btn-ghost btn-sm">Filter</button>
-        {(stage || growth || trainer) && <Link href="/dashboard" className="text-sm text-blue hover:underline">Clear</Link>}
+        {(stage || growth || trainer || confirmation || content) && <Link href="/dashboard" className="text-sm text-blue hover:underline">Clear</Link>}
       </form>
 
       <section className="card overflow-x-auto p-0">

@@ -200,3 +200,19 @@ export function buildTrainings(input: {
 }
 
 export const isStage = (s: unknown): s is Stage => typeof s === "string" && Object.hasOwn(STAGE_LABEL, s);
+
+// Dashboard filters for the Trainer confirmation and Content columns.
+export const CONFIRMATION_FILTERS = { pending: "Pending", confirmed: "Confirmed", partly: "Partly confirmed", declined: "Declined", no_trainer: "No trainer yet" } as const;
+export type ConfirmationFilter = keyof typeof CONFIRMATION_FILTERS;
+export const isConfirmationFilter = (s: unknown): s is ConfirmationFilter => typeof s === "string" && Object.hasOwn(CONFIRMATION_FILTERS, s);
+
+export function confirmationFilter(label: string): ConfirmationFilter | null {
+  if (label === "Pending") return "pending";
+  if (label === "Confirmed") return "confirmed";
+  if (label === "Declined") return "declined";
+  if (label === "No trainer yet") return "no_trainer";
+  if (/ of \d+ confirmed$/.test(label)) return "partly";
+  return null;
+}
+
+export const isContentFilter = (s: unknown): s is Exclude<ContentState, "none"> => typeof s === "string" && Object.hasOwn(CONTENT_LABEL, s);

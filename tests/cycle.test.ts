@@ -260,3 +260,15 @@ describe("training audio", () => {
     expect(isAudioPath("b1/brief-1700000000-audio-notes.pdf")).toBe(false);
   });
 });
+
+describe("dashboard filters", () => {
+  it("groups every confirmation label into a filter", async () => {
+    const { confirmationFilter } = await import("../src/lib/cycle");
+    expect(confirmationFilter("Pending")).toBe("pending");
+    expect(confirmationFilter("Confirmed")).toBe("confirmed");
+    expect(confirmationFilter("2 of 3 confirmed")).toBe("partly");
+    expect(confirmationFilter("Declined")).toBe("declined");
+    expect(confirmationFilter("No trainer yet")).toBe("no_trainer");
+    expect(confirmationFilter("—")).toBeNull();
+  });
+});
