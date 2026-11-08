@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   ACCESS,
+  applyCategory,
   canManageTeam,
+  dropCategory,
   cleanPermissions,
   cleanTeamAdmin,
   getsEmails,
@@ -66,6 +68,29 @@ describe("portal accesses", () => {
     expect(homePath({ id: "c", role: "content", real_role: "content", permissions: [] })).toBe("/no-access");
     expect(homePath({ id: "c", role: "content", real_role: "content", permissions: [], team_admin_of: ["content"] })).toBe("/content");
     expect(homePath({ id: "g", role: "growth", real_role: "growth", permissions: [] })).toBe("/bookings");
+  });
+});
+
+describe("categories", () => {
+  it("putting someone in a category sets only that category's accesses", () => {
+    const cur = { roles: ["growth"], team_admin_of: [], permissions: ["growth.calendar"] };
+    expect(applyCategory(cur, "content", ["content.view", "growth.new_deal"], false)).toEqual({ roles: ["growth", "content"], team_admin_of: [], permissions: ["growth.calendar", "content.view"] });
+    expect(applyCategory(cur, "growth", ["growth.new_deal"], false).permissions).toEqual(["growth.new_deal"]);
+  });
+
+  it("a portal admin gets every access of the portal, and keeps them when made a member again", () => {
+    const lead = applyCategory({ roles: [] }, "content", [], true);
+    expect(lead.team_admin_of).toEqual(["content"]);
+    expect(lead.permissions).toEqual(["content.view", "content.write", "content.submit", "content.emails"]);
+    expect(applyCategory(lead, "content", lead.permissions, false)).toEqual({ ...lead, team_admin_of: [] });
+  });
+
+  it("company admin keeps the other categories untouched", () => {
+    expect(applyCategory({ roles: ["growth"], team_admin_of: ["growth"], permissions: ["growth.new_deal"] }, "admin", [], false)).toEqual({ roles: ["growth", "admin"], team_admin_of: ["growth"], permissions: ["growth.new_deal"] });
+  });
+
+  it("dropping a category removes its accesses and portal admin", () => {
+    expect(dropCategory({ roles: ["growth", "content"], team_admin_of: ["content"], permissions: ["growth.new_deal", "content.view"] }, "content")).toEqual({ roles: ["growth"], team_admin_of: [], permissions: ["growth.new_deal"] });
   });
 });
 

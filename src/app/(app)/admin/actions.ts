@@ -8,7 +8,7 @@ import { emailLayout, sendEmail, siteUrl } from "@/lib/email";
 import { isUuid } from "@/lib/format";
 import { hasUnprintable } from "@/lib/pdf-text";
 import { ensureAuthUser, rolesText, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
-import { cleanPermissions, cleanTeamAdmin } from "@/lib/team-access";
+import { applyCategory, cleanPermissions, dropCategory, isCategory, TEAM_LABEL, type Category } from "@/lib/team-access";
 import { audit } from "@/lib/notify";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -180,59 +180,99 @@ async function sendTrainerAccess(email: string, name: string) {
   );
 }
 
-const pickRoles = (fd: FormData) => STAFF_ROLES.filter((r) => fd.getAll("roles").map(String).includes(r));
-// The "Team admin" ticks, kept only for teams the person is in.
-const pickTeamAdmin = (fd: FormData, roles: string[]) => cleanTeamAdmin(roles, fd.getAll("team_admin").map(String));
-// The ticked accesses, kept only for portals the person is in.
-const pickAccess = (fd: FormData, roles: string[]) => cleanPermissions(roles, fd.getAll("access").map(String));
+const pickAccess = (fd: FormData) => fd.getAll("access").map(String);
+const isPortalAdmin = (fd: FormData) => fd.get("portal_admin") === "on";
+const isStaffRoles = (roles: string[]) => roles.some((r) => (STAFF_ROLES as readonly string[]).includes(r));
+const CATEGORY_TEXT: Record<Category, string> = { ...TEAM_LABEL, admin: "Admin" };
+type AccessRow = { roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
+const accessOf = (r: AccessRow | null) => ({ roles: r?.roles ?? [], team_admin_of: r?.team_admin_of ?? [], permissions: r?.permissions ?? [] });
 
-// One email can hold several roles (e.g. Booking manager + Growth); the highest becomes the main one.
+function accessError(category: Category, picked: string[], portalAdmin: boolean) {
+  if (category === "admin" || portalAdmin) return null;
+  return cleanPermissions([category], picked).length ? null : "Turn on at least one access, or make them portal admin.";
+}
+
+// Create user: one category and its accesses, then the set-your-password email.
 export async function addTeamMember(fd: FormData) {
   const me = await requireRole("admin");
   const email = str(fd, "email").toLowerCase();
   const full_name = str(fd, "full_name");
-  const roles = pickRoles(fd);
+  const category = str(fd, "category");
   if (!email || !full_name) return { error: "Enter a name and email." };
   if (!EMAIL.test(email)) return { error: "Enter a valid email address." };
-  if (!roles.length) return { error: "Tick at least one role." };
-  // Adding never overwrites someone who already has access: their roles are changed in the table instead.
-  const { data: existing } = await db().from("app_users").select("id, roles").eq("email", email).maybeSingle();
-  const held = (existing as { id: string; roles: string[] | null } | null)?.roles ?? [];
-  if (existing && held.some((r) => (STAFF_ROLES as readonly string[]).includes(r))) return { error: "That person is already on the team. Change their access in the table below." };
+  if (full_name.length > 120) return { error: "Keep the name under 120 characters." };
+  if (!isCategory(category)) return { error: "Choose a category." };
+  const picked = pickAccess(fd);
+  const portalAdmin = isPortalAdmin(fd);
+  const bad = accessError(category, picked, portalAdmin);
+  if (bad) return { error: bad };
+  // Adding never overwrites someone who already has access: their access is changed on their page instead.
+  const { data: existing } = await db().from("app_users").select("id, roles, team_admin_of, permissions").eq("email", email).maybeSingle();
+  const cur = existing as (AccessRow & { id: string }) | null;
+  if (cur && isStaffRoles(cur.roles ?? [])) return { error: "That person is already on the team. Open them in the list to change their access." };
+  let sent = true;
   try {
     const { id } = await ensureAuthUser(email);
     // A previously removed member was blocked from signing in; adding them back lifts that.
     await db().auth.admin.updateUserById(id, { ban_duration: "none" });
     // A trainer being added to the team keeps the trainer pages.
-    const all = [...new Set([...held, ...roles])];
+    const next = applyCategory(accessOf(cur), category, picked, portalAdmin);
     const { error } = await db()
       .from("app_users")
-      .upsert({ id, email, full_name, role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all), permissions: pickAccess(fd, all) });
+      .upsert({ id, email, full_name, role: mainRole(next.roles), ...next });
     if (error) return failed("addTeamMember", error);
-    await audit(me.id, "team_member_added", null, { email, roles, team_admin_of: pickTeamAdmin(fd, all) });
-    await sendInvite(email, full_name, rolesText(roles));
+    await audit(me.id, "team_member_added", null, { email, category, portal_admin: portalAdmin, access: next.permissions });
+    try {
+      await sendInvite(email, full_name, CATEGORY_TEXT[category]);
+    } catch (e) {
+      console.error("[addTeamMember invite]", e instanceof Error ? e.message : e);
+      sent = false;
+    }
   } catch (e) {
     console.error("[addTeamMember]", e instanceof Error ? e.message : e);
-    return { error: "The member was saved but the invitation couldn't be sent. Use “Resend invite” to try again." };
+    return { error: "Couldn't create the user. Please try again." };
   }
-  return done("/admin/users", `Invitation sent to ${email}.`);
+  revalidatePath("/admin/users");
+  redirect(`/admin/users?${new URLSearchParams(sent ? { added: email } : { unsent: email })}`);
 }
 
+// Edit user: the accesses of one category (adding the category if they weren't in it).
 export async function updateTeamMember(fd: FormData) {
   const me = await requireRole("admin");
   const id = str(fd, "id");
+  const category = str(fd, "category");
   if (!isUuid(id)) return { error: "Member not found." };
-  const roles = pickRoles(fd);
-  if (!roles.length) return { error: "Tick at least one role, or remove the member." };
-  if (id === me.id && !roles.includes("admin")) return { error: "You can't remove your own admin access." };
-  const { data: cur } = await db().from("app_users").select("roles").eq("id", id).maybeSingle();
-  if (!cur) return { error: "Member not found." };
-  // Keep the trainer role if they have one; only the staff roles are edited here.
-  const keep = ((cur as { roles: string[] | null }).roles ?? []).filter((r) => !(STAFF_ROLES as readonly string[]).includes(r));
-  const all = [...new Set([...roles, ...keep])];
-  const { error } = await db().from("app_users").update({ role: mainRole(all), roles: all, team_admin_of: pickTeamAdmin(fd, all), permissions: pickAccess(fd, all) }).eq("id", id);
+  if (!isCategory(category)) return { error: "Choose a category." };
+  const picked = pickAccess(fd);
+  const portalAdmin = isPortalAdmin(fd);
+  const bad = accessError(category, picked, portalAdmin);
+  if (bad) return { error: bad };
+  const { data } = await db().from("app_users").select("roles, team_admin_of, permissions").eq("id", id).maybeSingle();
+  if (!data) return { error: "Member not found." };
+  const next = applyCategory(accessOf(data as AccessRow), category, picked, portalAdmin);
+  const { error } = await db().from("app_users").update({ role: mainRole(next.roles), ...next }).eq("id", id);
   if (error) return failed("updateTeamMember", error);
-  return done("/admin/users", "Access saved.");
+  await audit(me.id, "team_admin_changed", null, { id, category, portal_admin: portalAdmin, access: next.permissions });
+  revalidatePath("/admin/users");
+  redirect(`/admin/users/${id}?category=${category}&saved=1`);
+}
+
+// Takes someone out of one category. Their last category goes through removeTeamMember instead.
+export async function removeFromCategory(fd: FormData) {
+  const me = await requireRole("admin");
+  const id = str(fd, "id");
+  const category = str(fd, "category");
+  if (!isUuid(id) || !isCategory(category)) return { error: "Member not found." };
+  if (id === me.id && category === "admin") return { error: "You can't remove your own admin access." };
+  const { data } = await db().from("app_users").select("roles, team_admin_of, permissions").eq("id", id).maybeSingle();
+  if (!data) return { error: "Member not found." };
+  const next = dropCategory(accessOf(data as AccessRow), category);
+  if (!isStaffRoles(next.roles)) return { error: "This is their only category. Use “Remove user” instead." };
+  const { error } = await db().from("app_users").update({ role: mainRole(next.roles), ...next }).eq("id", id);
+  if (error) return failed("removeFromCategory", error);
+  await audit(me.id, "team_admin_changed", null, { id, removed_category: category });
+  revalidatePath("/admin/users");
+  redirect(`/admin/users/${id}?saved=1`);
 }
 
 // Access is taken away, not the record: their name stays on past bookings and in the activity log,
@@ -257,6 +297,7 @@ export async function removeTeamMember(fd: FormData) {
   }
   await audit(me.id, "team_member_removed", null, { id });
   revalidatePath("/admin/users");
+  redirect("/admin/users?removed=1");
 }
 
 export async function resendTeamInvite(fd: FormData) {

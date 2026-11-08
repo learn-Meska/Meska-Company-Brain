@@ -93,3 +93,43 @@ export const ChevronRightIcon = (p: IconProps) => (
     <path d="m9 6 6 6-6 6" />
   </Svg>
 );
+
+export const ShieldIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z" />
+    <path d="m9 12 2 2 4-4" />
+  </Svg>
+);
+
+export const TrendIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m3 17 6-6 4 4 8-8" />
+    <path d="M15 7h6v6" />
+  </Svg>
+);
+
+export const PenIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M16.9 3.6a2.1 2.1 0 0 1 3 3L8 18.5l-4 1 1-4z" />
+    <path d="m14.5 6 3.5 3.5" />
+  </Svg>
+);
+
+export const AwardIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="9" r="6" />
+    <path d="m8.5 14.2-1.5 6.8 5-3 5 3-1.5-6.8" />
+  </Svg>
+);
+
+export const CheckIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m5 12.5 4.5 4.5L19 7.5" />
+  </Svg>
+);
+
+export const PlusIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 5v14M5 12h14" />
+  </Svg>
+);
