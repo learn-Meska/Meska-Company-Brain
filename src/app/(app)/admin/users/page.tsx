@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { addTeamMember, removeTeamMember, resendTeamInvite, updateTeamMember } from "../actions";
 
-type U = { id: string; email: string; full_name: string; role: string; roles: string[] | null; can_manage_trainers: boolean };
+type U = { id: string; email: string; full_name: string; role: string; roles: string[] | null; team_admin_of: string[] | null; can_manage_trainers: boolean };
 
 const ROLE_OPTIONS = [
   ["approver", "Training Excellence"],
@@ -13,13 +13,21 @@ const ROLE_OPTIONS = [
   ["admin", "Admin"],
 ] as const;
 
-function RoleBoxes({ checked }: { checked: string[] }) {
+// Each team role has a "Team admin" tick next to it; the server keeps it only when the role is ticked too.
+function RoleBoxes({ checked, leads = [] }: { checked: string[]; leads?: string[] }) {
   return (
     <>
       {ROLE_OPTIONS.map(([v, l]) => (
-        <label key={v} className="flex items-center gap-1.5 text-sm">
-          <input type="checkbox" name="roles" value={v} defaultChecked={checked.includes(v)} /> {l}
-        </label>
+        <span key={v} className="inline-flex items-center gap-2 rounded-lg border border-line px-2 py-1">
+          <label className="flex items-center gap-1.5 text-sm">
+            <input type="checkbox" name="roles" value={v} defaultChecked={checked.includes(v)} /> {l}
+          </label>
+          {v !== "admin" && (
+            <label className="flex items-center gap-1 text-xs text-muted" title={`Can add and remove people in ${l}`}>
+              <input type="checkbox" name="team_admin" value={v} defaultChecked={leads.includes(v)} /> Team admin
+            </label>
+          )}
+        </span>
       ))}
     </>
   );
@@ -32,7 +40,7 @@ export default async function UsersPage() {
   const users = ((data ?? []) as U[]).filter((u) => (u.roles ?? []).length > 0);
   return (
     <div className="space-y-6">
-      <PageHeader kicker="Access" title={<>Team &amp; access</>} lead={<>Training Excellence (e.g. Amr Fahmy, Mahmoud) and admins book trainers; Growth finds trainers and downloads their profiles; Content prepares the guide and files for each deal. Tick more than one role to give the same email several kinds of access; they switch between them from the menu. Trainers are invited from their profile page — a team member can be a trainer too.</>} />
+      <PageHeader kicker="Access" title={<>Team &amp; access</>} lead={<>Training Excellence (e.g. Amr Fahmy, Mahmoud) and admins book trainers; Growth finds trainers and downloads their profiles; Content prepares the guide and files for each deal. Tick more than one role to give the same email several kinds of access; they switch between them from the menu. Tick <b>Team admin</b> next to a team to let that person add and remove people in that team from <b>My team</b>. Trainers are invited from their profile page — a team member can be a trainer too.</>} />
 
       <section className="card">
         <h2 className="h2 mb-3">Add a team member</h2>
@@ -74,7 +82,7 @@ export default async function UsersPage() {
                 <td>
                   <Form action={updateTeamMember} className="flex flex-wrap items-center gap-2">
                     <input type="hidden" name="id" value={u.id} />
-                    <RoleBoxes checked={u.roles ?? [u.role]} />
+                    <RoleBoxes checked={u.roles ?? [u.role]} leads={u.team_admin_of ?? []} />
                     <Submit className="btn-ghost btn-sm">Save</Submit>
                   </Form>
                 </td>
