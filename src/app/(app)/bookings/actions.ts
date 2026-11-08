@@ -200,7 +200,8 @@ export async function createRequest(input: NewRequest) {
       }
       const open = rows.filter((b) => !b.trainer_id);
       const sameNote = input.same_trainer && open.length > 1;
-      await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
+      // Everyone in Training Excellence (and company admins) is told, the creator included: they may lead TE too.
+      await notify(await usersWithRoles("admin", "approver"), {
         title: open.length ? `Trainer needed: ${input.program_name}${rows.length > 1 ? ` (${open.length} of ${rows.length} days)` : ""}` : `New booking: ${input.program_name} — trainer emailed`,
         body: `${me.full_name} requested ${rows.map((b) => `${when(b)}${b.trainers ? ` (${b.trainers.full_name})` : ""}`).join("; ")}${sameNote ? " · same trainer preferred" : ""}`,
         link: `/bookings/${rows[0].id}`,
