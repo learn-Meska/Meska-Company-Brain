@@ -82,7 +82,7 @@ export async function requireRole(...roles: Role[]): Promise<CurrentUser> {
   return u;
 }
 
-// Admin, or a booking manager allowed to manage trainer profiles (e.g. Mahmoud)
+// Admins and Training Excellence create, edit and invite trainer profiles.
 export async function requireTrainerManager(): Promise<CurrentUser> {
   const u = await requireUser();
   if (!canManageTrainers(u)) redirect("/");
@@ -99,7 +99,7 @@ export async function requireTrainer(): Promise<CurrentUser & { trainer_id: stri
 
 export const ROLE_LABEL: Record<Role, string> = { admin: "Admin", approver: "Training Excellence", growth: "Growth", content: "Content", trainer: "Trainer" };
 
-export const canManageTrainers = (u: CurrentUser) => u.role === "admin" || u.can_manage_trainers;
+export const canManageTrainers = (u: CurrentUser) => u.role === "admin" || u.role === "approver";
 // Scoring & lists (skills, filter lists, score categories, tiers, rules): admins and booking managers.
 export const canEditSettings = (u: CurrentUser) => u.role === "admin" || u.role === "approver" || u.can_manage_trainers;
 
