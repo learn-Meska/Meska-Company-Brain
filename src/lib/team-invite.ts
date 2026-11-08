@@ -50,3 +50,9 @@ export async function sendTeamAdded(email: string, name: string, teamText: strin
     }),
   );
 }
+
+// Logins that have signed in at least once ("Active"); the others are still "Invited".
+export async function activeLoginIds(): Promise<Set<string>> {
+  const { data } = await db().auth.admin.listUsers({ perPage: 1000 });
+  return new Set((data?.users ?? []).filter((u) => !!u.last_sign_in_at).map((u) => u.id));
+}

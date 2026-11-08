@@ -132,3 +132,24 @@ export function getsEmails(u: { team_admin_of?: string[] | null; permissions?: s
   const key = ACCESS[role].find((a) => a.key.endsWith(".emails"))!.key;
   return (u.team_admin_of ?? []).includes(role) || (u.permissions ?? []).includes(key);
 }
+
+export type Category = Team | "admin";
+export const isCategory = (v: unknown): v is Category => v === "admin" || isTeam(v);
+
+type Access = { roles: string[]; team_admin_of: string[]; permissions: string[] };
+
+// Puts someone in one category with these accesses, keeping their other categories as they are.
+// A portal admin is stored with every access of the portal, so un-making them admin keeps everything on.
+export function applyCategory(cur: Partial<Access>, category: Category, picked: string[], portalAdmin: boolean): Access {
+  const roles = [...new Set([...(cur.roles ?? []), category])];
+  if (category === "admin") return { roles, team_admin_of: cleanTeamAdmin(roles, cur.team_admin_of ?? []), permissions: cleanPermissions(roles, cur.permissions ?? []) };
+  const lead = portalAdmin ? [...(cur.team_admin_of ?? []), category] : (cur.team_admin_of ?? []).filter((t) => t !== category);
+  const permissions = withPortalAccess(cur.permissions ?? [], category, portalAdmin ? allAccess(category) : picked);
+  return { roles, team_admin_of: cleanTeamAdmin(roles, lead), permissions: cleanPermissions(roles, permissions) };
+}
+
+// Takes someone out of one category, keeping the rest.
+export function dropCategory(cur: Partial<Access>, category: Category): Access {
+  const roles = (cur.roles ?? []).filter((r) => r !== category);
+  return { roles, team_admin_of: cleanTeamAdmin(roles, cur.team_admin_of ?? []), permissions: cleanPermissions(roles, cur.permissions ?? []) };
+}
