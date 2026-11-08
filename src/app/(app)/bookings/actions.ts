@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { can, requireAccess, requireRole, requireTrainer, requireUser, type CurrentUser } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { esc, siteUrl } from "@/lib/email";
@@ -112,13 +113,15 @@ export async function createRequest(input: NewRequest) {
   const me = await requireAccess("growth.new_deal", "te.assign");
   const invalid = requestError(input, { role: me.role, userId: me.id, today: todayISO() });
   if (invalid) return { error: invalid };
-  // A picked trainer must still be free and matching when the request is sent.
-  for (const d of input.days) {
-    if (d.trainer_id && !(await freeTrainers(d)).some((t) => t.id === d.trainer_id))
-      return { error: `Day ${d.day_number}: that trainer is no longer available. Pick another or leave it to Training Excellence.` };
-  }
-  // The proposal must really be in storage (the browser uploads it before sending the request).
-  const { error: missingFile } = await db().storage.from("proposals").createSignedUrl(input.proposal.path, 60);
+  // A picked trainer must still be free and matching when the request is sent, and the proposal must really be
+  // in storage (the browser uploads it first). All days are checked at once.
+  const picked = input.days.filter((d) => d.trainer_id);
+  const [free, { error: missingFile }] = await Promise.all([
+    Promise.all(picked.map((d) => freeTrainers(d))),
+    db().storage.from("proposals").createSignedUrl(input.proposal.path, 60),
+  ]);
+  const gone = picked.find((d, i) => !free[i].some((t) => t.id === d.trainer_id));
+  if (gone) return { error: `Day ${gone.day_number}: that trainer is no longer available. Pick another or leave it to Training Excellence.` };
   if (missingFile) return { error: "The proposal didn't finish uploading. Upload it again." };
 
   const programName = input.program_name.trim();
@@ -187,50 +190,58 @@ export async function createRequest(input: NewRequest) {
     return { ok: "Request sent. It's on the calendar.", ids };
   }
   const total = dealTotal(valuePerDay, dealDays);
-  for (const b of rows) {
-    await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null, deal: dealId, value_per_day: valuePerDay, days: dealDays, participants: input.participants.length });
-    if (b.trainer_id) await emailAssignment(b);
-  }
-  const open = rows.filter((b) => !b.trainer_id);
-  const sameNote = input.same_trainer && open.length > 1;
-  await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
-    title: open.length ? `Trainer needed: ${input.program_name}${rows.length > 1 ? ` (${open.length} of ${rows.length} days)` : ""}` : `New booking: ${input.program_name} — trainer emailed`,
-    body: `${me.full_name} requested ${rows.map((b) => `${when(b)}${b.trainers ? ` (${b.trainers.full_name})` : ""}`).join("; ")}${sameNote ? " · same trainer preferred" : ""}`,
-    link: `/bookings/${rows[0].id}`,
-    email: {
-      subject: open.length ? `Trainer needed: ${input.program_name}` : `New booking: ${input.program_name}`,
-      intro: `<b>${esc(me.full_name)}</b> requested ${rows.length > 1 ? `${rows.length} training days` : "a training"}. ${
-        open.length ? `Please assign a trainer${rows.length > open.length ? " for the days without one" : ""}.` : "The chosen trainer was emailed to confirm."
-      }${sameNote ? " <b>Same trainer preferred for all days.</b>" : ""}`,
-      rows: [
-        ["Company", esc(input.company_name.trim())],
-        ["Program", esc(input.program_name)],
-        ["Client contact", `${esc(input.contact.name)} · ${esc(input.contact.email)} · ${esc(input.contact.mobile)}`],
-        ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${b.trainers ? esc(b.trainers.full_name) : "<i>needs a trainer</i>"}`] as [string, string]),
-        ["Industry", esc(rows[0].industry?.name ?? "")],
-        ["Participants", String(input.participants.length)],
-        ["Deal value", `${fmtAmount(valuePerDay)} per day × ${dealDays} ${dealDays === 1 ? "day" : "days"} = <b>${fmtAmount(total)}</b>`],
-        ["Proposal", esc(input.proposal.name)],
-      ],
-      button: open.length ? "Assign a trainer" : "View the training",
-    },
-  });
-  // The content team gets the request too: they read the audience and proposal, then write the content.
-  await notify(await usersWithRoles("content"), {
-    title: `New content request: ${input.company_name.trim()} — ${input.program_name}`,
-    body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the audience and proposal.`,
-    link: `/content/${dealId}`,
-    email: {
-      subject: `Content request: ${input.company_name.trim()} — ${input.program_name}`,
-      intro: `<b>${esc(me.full_name)}</b> sent a new deal. Please read the audience and proposal, prepare the content and upload it, then submit it so the trainer can use it.`,
-      rows: [
-        ["Company", esc(input.company_name.trim())],
-        ["Program", esc(input.program_name)],
-        ["Days", String(rows.length)],
-        ["Participants", String(input.participants.length)],
-      ],
-      button: "Open the request",
-    },
+  // The request is saved. Audit, bell and emails run after the answer goes back, so sending through Gmail
+  // (about a second per email) never keeps Growth waiting. sendEmail still logs every message to email_outbox.
+  after(async () => {
+    try {
+      for (const b of rows) {
+        await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null, deal: dealId, value_per_day: valuePerDay, days: dealDays, participants: input.participants.length });
+        if (b.trainer_id) await emailAssignment(b);
+      }
+      const open = rows.filter((b) => !b.trainer_id);
+      const sameNote = input.same_trainer && open.length > 1;
+      await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
+        title: open.length ? `Trainer needed: ${input.program_name}${rows.length > 1 ? ` (${open.length} of ${rows.length} days)` : ""}` : `New booking: ${input.program_name} — trainer emailed`,
+        body: `${me.full_name} requested ${rows.map((b) => `${when(b)}${b.trainers ? ` (${b.trainers.full_name})` : ""}`).join("; ")}${sameNote ? " · same trainer preferred" : ""}`,
+        link: `/bookings/${rows[0].id}`,
+        email: {
+          subject: open.length ? `Trainer needed: ${input.program_name}` : `New booking: ${input.program_name}`,
+          intro: `<b>${esc(me.full_name)}</b> requested ${rows.length > 1 ? `${rows.length} training days` : "a training"}. ${
+            open.length ? `Please assign a trainer${rows.length > open.length ? " for the days without one" : ""}.` : "The chosen trainer was emailed to confirm."
+          }${sameNote ? " <b>Same trainer preferred for all days.</b>" : ""}`,
+          rows: [
+            ["Company", esc(input.company_name.trim())],
+            ["Program", esc(input.program_name)],
+            ["Client contact", `${esc(input.contact.name)} · ${esc(input.contact.email)} · ${esc(input.contact.mobile)}`],
+            ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${b.trainers ? esc(b.trainers.full_name) : "<i>needs a trainer</i>"}`] as [string, string]),
+            ["Industry", esc(rows[0].industry?.name ?? "")],
+            ["Participants", String(input.participants.length)],
+            ["Deal value", `${fmtAmount(valuePerDay)} per day × ${dealDays} ${dealDays === 1 ? "day" : "days"} = <b>${fmtAmount(total)}</b>`],
+            ["Proposal", esc(input.proposal.name)],
+          ],
+          button: open.length ? "Assign a trainer" : "View the training",
+        },
+      });
+      // The content team gets the request too: they read the audience and proposal, then write the content.
+      await notify(await usersWithRoles("content"), {
+        title: `New content request: ${input.company_name.trim()} — ${input.program_name}`,
+        body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the audience and proposal.`,
+        link: `/content/${dealId}`,
+        email: {
+          subject: `Content request: ${input.company_name.trim()} — ${input.program_name}`,
+          intro: `<b>${esc(me.full_name)}</b> sent a new deal. Please read the audience and proposal, prepare the content and upload it, then submit it so the trainer can use it.`,
+          rows: [
+            ["Company", esc(input.company_name.trim())],
+            ["Program", esc(input.program_name)],
+            ["Days", String(rows.length)],
+            ["Participants", String(input.participants.length)],
+          ],
+          button: "Open the request",
+        },
+      });
+    } catch (e) {
+      console.error("[createRequest notify]", e instanceof Error ? e.message : e);
+    }
   });
   refresh();
   return { ok: "Request sent. It's on the calendar and Training Excellence was notified.", ids: rows.map((b) => b.id) };

@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   free: [] as { id: string; full_name: string; title: string | null }[],
   notified: [] as { to: string[]; title: string; email?: { subject: string; rows?: [string, string][] } }[],
   audits: [] as { action: string; details: Record<string, unknown> }[],
+  later: [] as Promise<unknown>[],
 }));
 
 vi.mock("@/lib/supabase", () => ({ db: () => h.fake.client, authClient: async () => ({}) }));
@@ -42,6 +43,8 @@ vi.mock("@/lib/auth", async () => {
 vi.mock("@/lib/search", () => ({ searchTrainers: async () => ({ matches: h.free, slots: [], unavailableCount: 0 }) }));
 vi.mock("@/lib/scoring", () => ({ getSetting: async (_k: string, fallback: unknown) => fallback }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+// after(): the audit, bell and emails run once the response is sent; the tests wait for them below.
+vi.mock("next/server", () => ({ after: (cb: () => unknown) => void h.later.push(Promise.resolve().then(cb)) }));
 vi.mock("@/lib/notify", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/notify")>();
   return {
@@ -55,7 +58,14 @@ vi.mock("@/lib/notify", async (importOriginal) => {
   };
 });
 
-const { createRequest, createProposalUpload, requestTrainerOptions, proposalLink } = await import("@/app/(app)/bookings/actions");
+const actions = await import("@/app/(app)/bookings/actions");
+const { createProposalUpload, requestTrainerOptions, proposalLink } = actions;
+// Waits for the work scheduled with after(), as if the response had gone out.
+const createRequest: typeof actions.createRequest = async (input) => {
+  const r = await actions.createRequest(input);
+  await Promise.all(h.later.splice(0));
+  return r;
+};
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
