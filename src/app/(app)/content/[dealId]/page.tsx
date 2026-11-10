@@ -157,7 +157,7 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
         />
 
         <aside className="space-y-5 lg:sticky lg:top-20">
-          <Panel icon={<TagIcon size={16} />} title="Proposal">
+          <Panel icon={<TagIcon size={16} />} title="Training outline">
             <div className="flex items-center gap-3">
               <FileBadge name={d.proposal_name} />
               <div className="min-w-0 flex-1">

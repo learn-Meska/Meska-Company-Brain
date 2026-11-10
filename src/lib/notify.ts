@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "./supabase";
 import { getsEmails } from "./team-access";
-import { emailLayout, esc, sendEmail, siteUrl, type Attachment, type EmailRow } from "./email";
+import { emailLayout, esc, sendEmail, siteUrl, type Attachment, type EmailRow, type TrainingStep } from "./email";
 import { fmtDate, fmtTime, programVisible, STATUS_LABEL } from "./format";
 
 type Recipient = { id: string; email: string; full_name: string };
@@ -29,11 +29,25 @@ export async function userById(id: string | null | undefined): Promise<Recipient
   return (data as Recipient | null) ?? null;
 }
 
+// heading: one line saying what happened; step: where the training stands; next: what happens next or what to do.
+export type NotifyEmail = {
+  subject: string;
+  heading?: string;
+  step?: TrainingStep;
+  intro: string;
+  rows?: EmailRow[];
+  content?: string;
+  extra?: string;
+  next?: string[];
+  button?: string;
+  attachments?: Attachment[];
+};
+
 // In-app bell notification plus (optionally) an email to each recipient.
 // Resolves to false when there was nobody to reach or an email failed to send.
 export async function notify(
   recipients: (Recipient | null | undefined)[],
-  n: { title: string; body?: string; link?: string; email?: { subject: string; intro: string; rows?: EmailRow[]; content?: string; extra?: string; button?: string; attachments?: Attachment[] } },
+  n: { title: string; body?: string; link?: string; email?: NotifyEmail },
 ) {
   const unique = [...new Map(recipients.filter((r): r is Recipient => !!r).map((r) => [r.id || r.email, r])).values()];
   if (!unique.length) return false;
@@ -53,8 +67,11 @@ export async function notify(
           e.subject,
           emailLayout({
             greeting: `Dear ${r.full_name.split(" ")[0]},`,
+            heading: e.heading,
+            step: e.step,
             intro: e.intro,
             rows: e.rows,
+            next: e.next,
             content: e.content,
             extra: e.extra,
             button: n.link ? { label: e.button ?? "Open in the system", url: siteUrl() + n.link } : undefined,
@@ -135,6 +152,14 @@ export function bookingRows(b: BookingRow, forTrainer = false): EmailRow[] {
     ...(b.audience ? [["Audience level", esc(b.audience.name)] as EmailRow] : []),
     ["Status", esc(STATUS_LABEL[b.status] ?? b.status)],
   ];
+}
+
+// Where a training day stands, for the step tracker at the top of its emails.
+export function stepFor(b: Pick<BookingRow, "status"> & { finished_at?: string | null }): TrainingStep {
+  if (b.finished_at) return "delivered";
+  if (b.status === "confirmed") return "confirmed";
+  if (b.status === "awaiting_trainer" || b.status === "pending_approval") return "assigned";
+  return "requested";
 }
 
 export async function trainerRecipient(b: BookingRow): Promise<Recipient | null> {

@@ -139,14 +139,14 @@ export function ProposalActions({ dealId, canPreview }: { dealId: string; canPre
       else window.location.href = r.url;
     } else {
       tab?.close();
-      setErr(r.error ?? "Couldn't open the proposal.");
+      setErr(r.error ?? "Couldn't open the training outline.");
     }
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
       {err && <span className="text-xs text-bad">{err}</span>}
       {canPreview && (
-        <button type="button" onClick={() => open(true)} disabled={busy} title="Preview" aria-label="Preview the proposal" className="ds-btn ds-btn-outline w-10 px-0">
+        <button type="button" onClick={() => open(true)} disabled={busy} title="Preview" aria-label="Preview the training outline" className="ds-btn ds-btn-outline w-10 px-0">
           <EyeIcon size={16} />
         </button>
       )}

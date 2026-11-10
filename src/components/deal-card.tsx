@@ -72,7 +72,7 @@ export async function DealCard({ dealId, bookingId, actions, showValue = true }:
           {/* wide enough to read the name; on a phone the buttons wrap to their own line instead */}
           <div className="min-w-[11rem] flex-1">
             <div className="truncate text-sm font-semibold text-ds-heading" title={d.proposal_name}>{d.proposal_name}</div>
-            <div className="mt-0.5 text-xs text-ds-text">Proposal{size ? ` · ${size}` : ""}</div>
+            <div className="mt-0.5 text-xs text-ds-text">Training outline{size ? ` · ${size}` : ""}</div>
           </div>
           <ProposalActions dealId={d.id} canPreview={/\.pdf$/i.test(d.proposal_name)} />
         </div>

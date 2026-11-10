@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { requireAccess } from "@/lib/auth";
-import { buildTrainings, CONFIRMATION_FILTERS, CONTENT_LABEL, confirmationFilter, isConfirmationFilter, isContentFilter, isStage, STAGE_LABEL, type CycleDay, type CycleDeal, type Stage, type Training } from "@/lib/cycle";
+import { buildTrainings, CONFIRMATION_FILTERS, CONTENT_LABEL, confirmationFilter, isConfirmationFilter, isContentFilter, isStage, STAGE_LABEL, type CycleDay, type CycleDeal, type Stage } from "@/lib/cycle";
 import { isAudioPath } from "@/lib/files";
-import { fmtDate, fmtTime, isUuid, todayISO } from "@/lib/format";
+import { isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
-import { fmtNps } from "@/lib/survey";
-import { CONTENT_STYLE, STAGE_STYLE } from "./styles";
+import { TrainingRow } from "@/components/training-row";
 import { AutoSelect } from "@/components/auto-select";
 
 const TILES: Stage[] = ["needs_trainer", "waiting_trainer", "scheduled", "in_delivery", "report_due", "delivered", "cancelled"];
@@ -121,42 +120,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
           </thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-muted">No trainings here.</td></tr>}
-            {rows.map((t) => <TrainingRow key={t.key} t={t} />)}
+            {rows.map((t) => <TrainingRow key={t.key} t={t} href={`/dashboard/${t.linkId}`} />)}
           </tbody>
         </table>
       </section>
     </div>
-  );
-}
-
-const confirmStyle = (label: string) => (label === "Confirmed" ? "bg-good-bg text-good" : label === "Declined" ? "bg-bad-bg text-bad" : label === "No trainer yet" ? "bg-[#FDE2EC] text-[#B4235A]" : label === "—" ? "bg-surface2 text-muted" : "bg-[#E2EBFE] text-royal");
-
-function TrainingRow({ t }: { t: Training }) {
-  const dayCount = t.live || t.days.length;
-  return (
-    <tr>
-      <td className="whitespace-nowrap">
-        {fmtDate(t.firstDate, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
-        <div className="text-xs text-muted">{dayCount > 1 ? `Until ${fmtDate(t.lastDate, { day: "numeric", month: "short", year: "numeric" })}` : `${fmtTime(t.firstDay.start_time)} – ${fmtTime(t.firstDay.end_time)}`}</div>
-      </td>
-      <td className="text-sm">{t.company ?? <span className="text-muted">—</span>}</td>
-      <td>
-        <Link href={`/dashboard/${t.linkId}`} className="font-medium text-blue hover:underline">{t.program}</Link>
-        <div className="text-xs text-muted">{dayCount} {dayCount === 1 ? "day" : "days"}</div>
-      </td>
-      <td className="text-xs text-muted">{t.industry ?? "—"}</td>
-      <td className="text-sm">{t.requestedByName ?? "—"}</td>
-      <td className="text-sm">{t.trainers.length ? t.trainers.map((x) => x.name).join(", ") : <span className="text-[#B4235A]">Not assigned</span>}</td>
-      <td><span className={`badge whitespace-nowrap ${confirmStyle(t.confirmation)}`}>{t.confirmation}</span></td>
-      <td>{t.content === "none" ? <span className="text-muted">—</span> : <span className={`badge whitespace-nowrap ${CONTENT_STYLE[t.content]}`}>{CONTENT_LABEL[t.content]}</span>}</td>
-      <td>
-        <span className={`badge whitespace-nowrap ${STAGE_STYLE[t.stage]}`}>{STAGE_LABEL[t.stage]}</span>
-        {t.attention && <div className="mt-1"><span className="badge whitespace-nowrap bg-bad-bg text-bad">Needs attention</span></div>}
-        {t.started && t.live > 0 && <div className="mt-1 whitespace-nowrap text-xs text-muted">Brief {t.briefs}/{t.live} · Audio {t.audios}/{t.live}</div>}
-      </td>
-      <td className="text-sm">
-        {t.responses ? <><b className="tabular-nums">{fmtNps(t.score)}</b><div className="whitespace-nowrap text-xs text-muted">{t.responses} {t.responses === 1 ? "response" : "responses"}</div></> : <span className="text-muted">—</span>}
-      </td>
-    </tr>
   );
 }

@@ -127,7 +127,7 @@ describe("proposal file", () => {
     expect(proposalPathError({ ...ok, path: `${USER}/../x.pdf` }, USER)).toMatch(/again/);
     expect(proposalPathError({ ...ok, path: `${USER}/a/b.pdf` }, USER)).toMatch(/again/);
     expect(proposalPathError({ ...ok, path: `${USER}/x.exe` }, USER)).toMatch(/PDF, Word/);
-    expect(proposalPathError(undefined, USER)).toMatch(/Upload the proposal/);
+    expect(proposalPathError(undefined, USER)).toMatch(/Upload the training outline/);
   });
 });
 
@@ -167,7 +167,7 @@ describe("requestError: the whole New deal, step by step", () => {
     ["industry id format", { industry_id: "not-a-uuid" }, /industry/],
     ["contact", { contact: { name: "A", email: "x", mobile: "0100000000" } }, /email/],
     ["participants", { participants: [] }, /participants file/],
-    ["proposal", { proposal: undefined as never }, /Upload the proposal/],
+    ["proposal", { proposal: undefined as never }, /Upload the training outline/],
     ["someone else's proposal", { proposal: { path: "999/x.pdf", name: "x.pdf", size: 1 } }, /again/],
     ["value", { value_per_day: 0 }, /value per training day/],
     ["days", { deal_days: 0 }, /how many days/],
@@ -183,10 +183,10 @@ describe("requestError: the whole New deal, step by step", () => {
     const three = [day, { ...day, day_number: 2 }, { ...day, day_number: 3 }];
     expect(requestError(validRequest({ deal_days: 3, days: three }), growth)).toBeNull();
     expect(requestError(validRequest({ deal_days: 3, days: three.slice(0, 1) }), growth)).toBe(
-      "The number of days chosen (1 day) does not match the proposal (3 days). Add 2 days so they match.",
+      "The number of days chosen (1 day) does not match the training outline (3 days). Add 2 days so they match.",
     );
     expect(requestError(validRequest({ deal_days: 2, days: three }), growth)).toBe(
-      "The number of days chosen (3 days) does not match the proposal (2 days). Remove 1 day so they match.",
+      "The number of days chosen (3 days) does not match the training outline (2 days). Remove 1 day so they match.",
     );
     // a bad day count in step 3 is reported as that, not as a mismatch
     expect(requestError(validRequest({ deal_days: 0, days: three }), growth)).toMatch(/how many days/);

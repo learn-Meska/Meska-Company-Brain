@@ -119,15 +119,15 @@ describe("New deal: happy path", () => {
       "New booking: Aman Holding HR — trainer emailed",
       "New content request: Aman Holding — Aman Holding HR",
     ]);
-    // the content team gets the company, program and headcount, never the deal value or proposal
+    // the content team gets the company, program, headcount and first day (the deadline), never the deal value or proposal
     expect(h.notified[3].to).toEqual(["content@meska.ai"]);
-    expect(Object.fromEntries(h.notified[3].email!.rows!)).toEqual({ Company: "Aman Holding", Program: "Aman Holding HR", Days: "2", Participants: "2" });
+    expect(Object.fromEntries(h.notified[3].email!.rows!)).toEqual({ Company: "Aman Holding", Program: "Aman Holding HR", Days: "2", Participants: "2", "First day": "Tuesday, 10 November 2026" });
     const trainerRows = h.notified[0].email!.rows!.map(([k]) => k);
     expect(trainerRows).toEqual(["Program", "Date", "Time", "Location", "Industry", "Status"]);
     const teamRows = Object.fromEntries(h.notified[2].email!.rows!);
     expect(teamRows["Participants"]).toBe("2");
     expect(teamRows["Deal value"]).toBe("100,000 per day × 2 days = <b>200,000</b>");
-    expect(teamRows["Proposal"]).toBe("Proposal.pdf");
+    expect(teamRows["Training outline"]).toBe("Proposal.pdf");
     expect(h.audits.map((a) => a.action)).toEqual(["training_requested", "training_requested"]);
     expect(h.audits[0].details).toMatchObject({ deal: fakeId(1), value_per_day: 100000, days: 2, participants: 2 });
   });
@@ -150,7 +150,7 @@ describe("New deal: refusals leave nothing behind", () => {
 
   it("days that don't match the proposal are refused before any write", async () => {
     const r = await createRequest(await uploadedRequest({ deal_days: 3 }));
-    expect(r.error).toBe("The number of days chosen (1 day) does not match the proposal (3 days). Add 2 days so they match.");
+    expect(r.error).toBe("The number of days chosen (1 day) does not match the training outline (3 days). Add 2 days so they match.");
     expect(h.fake.writes).toEqual([]);
   });
 

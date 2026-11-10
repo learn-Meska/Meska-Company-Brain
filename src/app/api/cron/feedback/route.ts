@@ -44,7 +44,9 @@ ${s.questions.map(questionHtml).join("")}`;
         body: `${s.count} participants · NPS ${fmtNps(s.nps)}`,
         link: `/me/bookings/${b.id}`,
         email: {
-          subject: `Your training evaluation — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
+          subject: `Your feedback results: ${trainerTitle(b)} on ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })} — NPS ${fmtNps(s.nps)}`,
+          heading: "Your participant feedback is in",
+          step: "delivered",
           intro: `Here is the participants' feedback for your training on <b>${esc(fmtDate(b.date))}</b>, based on <b>${s.count}</b> ${s.count === 1 ? "response" : "responses"}.`,
           extra: scores,
           button: "View the details",

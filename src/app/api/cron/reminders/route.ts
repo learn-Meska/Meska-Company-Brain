@@ -27,13 +27,30 @@ export async function GET(request: NextRequest) {
       title,
       body: `No response after ${hours} hours. Follow up or book another trainer.`,
       link: `/bookings/${b.id}`,
-      email: { subject: title, intro: `The trainer hasn't confirmed this assignment within ${hours} hours. Please follow up or book someone else.`, rows: bookingRows(b) },
+      email: {
+        subject: `Action needed: ${b.trainers?.full_name} hasn't confirmed ${b.program_name} — Day ${b.day_number} after ${hours} hours`,
+        heading: "The trainer hasn't confirmed yet",
+        step: "assigned",
+        intro: `<b>${esc(b.trainers?.full_name ?? "The trainer")}</b> hasn't confirmed this assignment within ${hours} hours. The trainer was sent a reminder too.`,
+        rows: bookingRows(b),
+        next: ["Follow up with the trainer, or open the training and assign someone else if they can't take it."],
+        button: "View the training",
+      },
     });
     // Sent once; an email Gmail rejects is re-sent on its own by retryFailedEmails().
     await notify([await trainerRecipient(b)], {
       title: `Reminder: please confirm ${trainerTitle(b)}`,
       link: `/me/bookings/${b.id}`,
-      email: { subject: `Reminder: please confirm your training on ${fmtDate(b.date, { day: "numeric", month: "long" })}`, intro: "You haven't confirmed this assignment yet.", rows: bookingRows(b, true), content: b.content || undefined, button: "Confirm the assignment" },
+      email: {
+        subject: `Reminder — action needed: confirm ${trainerTitle(b)} on ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        heading: "Please confirm your training",
+        step: "assigned",
+        intro: `You were assigned this training more than ${hours} hours ago and haven't confirmed it yet.`,
+        rows: bookingRows(b, true),
+        content: b.content || undefined,
+        next: ["Open the training and <b>confirm</b> it, or decline with a short reason so the team can find another trainer."],
+        button: "Confirm the assignment",
+      },
     });
     out.unconfirmed++;
   }
@@ -65,7 +82,9 @@ export async function GET(request: NextRequest) {
         link: `/me/availability?m=${nextMonth.slice(0, 7)}`,
         email: {
           subject: `Your availability for ${label} is due${day === day_of_month ? " today" : ` on the ${ordinal(day_of_month)}`}`,
+          heading: `Your availability for ${label}`,
           intro: `Please mark the days and slots you're available in <b>${esc(label)}</b> and confirm the month, so Growth can book you.`,
+          next: ["Open My availability, tick the mornings and evenings you're free, then confirm the month."],
           button: "Update my availability",
         },
       });
