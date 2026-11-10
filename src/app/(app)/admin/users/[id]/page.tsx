@@ -8,11 +8,11 @@ import { UserAccessForm } from "@/components/user-access-form";
 import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { fmtDateTime, isUuid } from "@/lib/format";
-import { inviteCutoff, isCategory, TEAM_LABEL, type Category } from "@/lib/team-access";
+import { inviteCutoff, isCategory, levelOf, TEAM_LABEL, type Category } from "@/lib/team-access";
 import { activeLoginIds } from "@/lib/team-invite";
+import { leaderChoices, teamPeople } from "@/lib/team-people";
 import { cancelAccessInvite, removeFromCategory, removeTeamMember, resendTeamInvite, updateTeamMember } from "../../actions";
 
-type U = { id: string; email: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
 
 const ORDER: Category[] = ["approver", "growth", "content", "admin"];
 const LABEL: Record<Category, string> = { ...TEAM_LABEL, admin: "Company admin" };
@@ -23,14 +23,15 @@ export default async function EditUserPage({ params, searchParams }: PageProps<"
   const { category: asked, add, saved, pending, unsent } = await searchParams;
   if (!isUuid(id)) notFound();
   const since = inviteCutoff();
-  const [{ data }, active, { data: invites }] = await Promise.all([
-    db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle(),
+  const [people, active, { data: invites }] = await Promise.all([
+    teamPeople(),
     activeLoginIds(),
     db().from("access_invites").select("category, created_at").eq("user_id", id).is("accepted_at", null).gte("created_at", since).order("created_at"),
   ]);
   const waiting = ((invites ?? []) as { category: string; created_at: string }[]).filter((i) => isCategory(i.category)) as { category: Category; created_at: string }[];
-  const u = data as U | null;
-  if (!u || !(u.roles ?? []).length) notFound();
+  const u = people.find((p) => p.id === id);
+  if (!u) notFound();
+  const leaders = leaderChoices(people, u.id);
 
   const held = ORDER.filter((c) => (u.roles ?? []).includes(c));
   const adding = add === "1";
@@ -80,6 +81,7 @@ export default async function EditUserPage({ params, searchParams }: PageProps<"
           key="add"
           action={updateTeamMember}
           categories={ORDER.filter((c) => !held.includes(c))}
+          leaders={leaders}
           hidden={{ id: u.id }}
           submitLabel="Add category"
           pendingLabel="Saving…"
@@ -91,7 +93,8 @@ export default async function EditUserPage({ params, searchParams }: PageProps<"
             key={current}
             action={updateTeamMember}
             categories={[current]}
-            initial={{ category: current, access: u.permissions ?? [], portalAdmin: current !== "admin" && (u.team_admin_of ?? []).includes(current) }}
+            initial={{ category: current, access: u.permissions ?? [], level: current === "admin" ? "member" : levelOf(u, current), leaderId: current === "admin" ? "" : (u.reports_to?.[current] ?? "") }}
+            leaders={leaders}
             hidden={{ id: u.id }}
             submitLabel="Save access"
             pendingLabel="Saving…"

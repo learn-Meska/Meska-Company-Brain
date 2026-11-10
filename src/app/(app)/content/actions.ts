@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { can, requireAccess, requireUser } from "@/lib/auth";
-import { approvesContent } from "@/lib/team-access";
+import { approvesContent, approvesContentOf, leaderOptions } from "@/lib/team-access";
+import { teamPeople } from "@/lib/team-people";
 import { db } from "@/lib/supabase";
 import { esc } from "@/lib/email";
 import { checkFile, downloadName, safeName } from "@/lib/files";
@@ -15,12 +16,22 @@ const MAX_NOTE = 1000;
 
 type LiveDeal = { id: string; company_name: string; content_submitted_at: string | null; content_review_requested_at: string | null; content_review_requested_by: string | null };
 
-// Content admins get the approval requests; with none, the company admins do, so a request never gets stuck.
-async function contentApprovers(exceptId: string) {
-  const { data } = await db().from("app_users").select("id, email, full_name").contains("roles", ["content"]).contains("team_admin_of", ["content"]);
-  const admins = (data ?? []) as { id: string; email: string; full_name: string }[];
-  const list = admins.length ? admins : await usersWithRoles("admin");
-  return list.filter((u) => u.id !== exceptId);
+// A member's approval request goes to their own team leader and to the content admins; with none of them,
+// the company admins get it, so a request never gets stuck.
+async function contentApprovers(member: { id: string; reports_to?: Record<string, string> | null }) {
+  const people = await teamPeople();
+  const leader = leaderOptions(people, "content", member.id).find((p) => p.id === member.reports_to?.content);
+  const admins = people.filter((p) => (p.roles ?? []).includes("content") && (p.team_admin_of ?? []).includes("content"));
+  const list = [...(leader ? [leader] : []), ...admins];
+  const unique = [...new Map(list.map((p) => [p.id, { id: p.id, email: p.email, full_name: p.full_name }])).values()];
+  return (unique.length ? unique : await usersWithRoles("admin")).filter((u) => u.id !== member.id);
+}
+
+// The member whose content is waiting for approval, with the leader they're assigned to.
+async function reviewRequester(id: string | null) {
+  if (!id) return null;
+  const { data } = await db().from("app_users").select("id, full_name, reports_to").eq("id", id).maybeSingle();
+  return data as { id: string; full_name: string; reports_to: Record<string, string> | null } | null;
 }
 
 // A deal the content team can work on: it exists and still has at least one live day.
@@ -93,7 +104,7 @@ export async function submitContent(dealId: string, guide: string) {
       .eq("id", dealId);
     if (error) return { error: friendlyError(error.message) };
     await audit(me.id, "content_review_requested", d.days[0].id, { company: d.deal.company_name, files: count ?? 0 });
-    await notify(await contentApprovers(me.id), {
+    await notify(await contentApprovers(me), {
       title: `Content waiting for your approval: ${label}`,
       body: `${me.full_name} sent the content for approval.`,
       link: `/content/${dealId}`,
@@ -112,7 +123,13 @@ export async function submitContent(dealId: string, guide: string) {
     });
     revalidatePath(`/content/${dealId}`);
     revalidatePath("/content");
-    return { ok: "Sent to the content admin for approval. You'll be told once it's approved." };
+    return { ok: "Sent to your team leader for approval. You'll be told once it's approved." };
+  }
+
+  // Content waiting for approval is approved by the member's own team leader or a content admin.
+  if (d.deal.content_review_requested_at && d.deal.content_review_requested_by !== me.id) {
+    const waitingFor = await reviewRequester(d.deal.content_review_requested_by);
+    if (!approvesContentOf(me, waitingFor)) return { error: `This content is waiting for ${waitingFor?.full_name ?? "the member"}'s team leader or a content admin to approve it.` };
   }
 
   const again = !!d.deal.content_submitted_at;
@@ -195,11 +212,12 @@ export async function submitContent(dealId: string, guide: string) {
 // A content admin sends a member's content back with a note; the draft stays so they can fix it and resend.
 export async function returnContent(dealId: string, note: string) {
   const me = await requireAccess("content.view");
-  if (!approvesContent(me)) return { error: "Only a content admin can send content back." };
+  if (!approvesContent(me)) return { error: "Only a team leader or a content admin can send content back." };
   const d = await liveDeal(dealId);
   if (!d) return { error: "Request not found." };
   const pendingAt = d.deal.content_review_requested_at;
   if (!pendingAt) return { error: "Nothing is waiting for approval." };
+  if (!approvesContentOf(me, await reviewRequester(d.deal.content_review_requested_by))) return { error: "Only this member's team leader or a content admin can send it back." };
   const text = typeof note === "string" ? note.trim() : "";
   if (!text) return { error: "Write what needs to change." };
   if (text.length > MAX_NOTE) return { error: `Keep the note under ${MAX_NOTE} characters.` };

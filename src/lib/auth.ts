@@ -20,6 +20,9 @@ export type CurrentUser = {
   views: Role[];
   // The teams (staff roles) this login leads as a team admin; see src/lib/team-access.ts.
   team_admin_of: string[];
+  // The portals this login is a team leader in, and the leader it is assigned to in each portal as a member.
+  team_leader_of: string[];
+  reports_to: Record<string, string>;
   // The portal accesses ticked for this login (keys like "te.assign"); see src/lib/team-access.ts.
   permissions: string[];
 };
@@ -46,7 +49,13 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const { data: u } = await db().from("app_users").select("*").eq("id", uid).maybeSingle();
   if (!u) return null;
   const { data: t } = await db().from("trainers").select("id").eq("user_id", uid).maybeSingle();
-  const base = u as Omit<CurrentUser, "trainer_id" | "real_role" | "views" | "team_admin_of" | "permissions"> & { roles: Role[] | null; team_admin_of: string[] | null; permissions: string[] | null };
+  const base = u as Omit<CurrentUser, "trainer_id" | "real_role" | "views" | "team_admin_of" | "team_leader_of" | "reports_to" | "permissions"> & {
+    roles: Role[] | null;
+    team_admin_of: string[] | null;
+    team_leader_of: string[] | null;
+    reports_to: Record<string, string> | null;
+    permissions: string[] | null;
+  };
   const trainerId = (t as { id: string } | null)?.id ?? null;
   // Removed from the team and not a trainer: no access, even while an old session is still valid.
   if (base.role === "trainer" && !(base.roles ?? []).length && !trainerId && (await removedMember(uid))) return null;
@@ -63,6 +72,8 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     real_role: base.role,
     trainer_id: trainerId,
     team_admin_of: base.team_admin_of ?? [],
+    team_leader_of: base.team_leader_of ?? [],
+    reports_to: base.reports_to ?? {},
     permissions: base.permissions ?? [],
   };
 });

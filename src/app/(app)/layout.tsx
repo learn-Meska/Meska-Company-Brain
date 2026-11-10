@@ -3,7 +3,7 @@ import { Nav, type NavItem } from "@/components/nav";
 import { can, canEditSettings, requireUser, ROLE_LABEL } from "@/lib/auth";
 import { setViewAs, signOut } from "@/app/auth/actions";
 import { ViewSwitcher } from "@/components/view-switcher";
-import { ledTeam } from "@/lib/team-access";
+import { dealScope, leaderTeam, ledTeam } from "@/lib/team-access";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const u = await requireUser();
@@ -17,15 +17,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (u.role === "approver" && has("te.assign") && !has("te.dashboard")) items.push({ href: "/request", label: "Request a training" });
     if (has("te.find")) items.push({ href: "/find", label: "Find a trainer" });
     if (has("te.find") || has("te.dashboard") || has("growth.calendar")) items.push({ href: "/calendar", label: "Calendar" });
-    if (u.role === "growth") items.push({ href: "/bookings", label: has("growth.all_bookings") ? "All bookings" : "My bookings" });
+    if (u.role === "growth") items.push({ href: "/bookings", label: { all: "All bookings", team: "Team bookings", own: "My bookings" }[dealScope(u)] });
     if (has("growth.trainers") || has("te.trainers") || has("te.find") || has("te.assign")) items.push({ href: "/trainers", label: "Trainers" });
     if (has("content.view")) items.push({ href: "/content", label: "Content requests" });
     if (canEditSettings(u)) items.push({ href: "/admin/feedback-form", label: "Feedback form" });
     if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
     else if (canEditSettings(u)) items.push({ href: "/admin/settings", label: "Scoring & lists" });
   }
-  // Portal admins manage the people in the portal they're working in.
-  if (ledTeam(u)) items.push({ href: "/team", label: "My team" });
+  // Portal admins manage the people in the portal they're working in; team leaders see their members.
+  if (ledTeam(u) || leaderTeam(u)) items.push({ href: "/team", label: "My team" });
   // Staff who also deliver trainings (e.g. the L&D director) get the trainer pages too.
   if (u.trainer_id && (u.role === u.real_role || u.role === "trainer")) {
     const p = u.role === "trainer" ? "My" : "My trainer";

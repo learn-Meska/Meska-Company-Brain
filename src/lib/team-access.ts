@@ -1,6 +1,8 @@
-// Portal access: each portal (Training Excellence, Growth, Content) has a list of accesses.
-// A portal admin has every access of their portal and manages the portal's team; a member has only the
-// accesses ticked for them. Company admins (role "admin") have everything everywhere.
+// Portal access: each portal (Training Excellence, Growth, Content) has a list of accesses and three layers.
+// - A portal admin has every access of their portal, creates its accounts and sees every deal.
+// - A team leader has the accesses ticked for them and sees the deals of the members assigned to them.
+// - A member has the accesses ticked for them, is assigned to one leader (or admin) and sees their own deals.
+// Company admins (role "admin") have everything everywhere.
 // Pure rules, tested in tests/team-access.test.ts.
 
 export const TEAMS = ["approver", "growth", "content"] as const;
@@ -27,7 +29,6 @@ export const ACCESS: Record<Team, AccessDef[]> = {
   ],
   growth: [
     { key: "growth.new_deal", label: "Send new deals", hint: "Use New deal, and edit or cancel their own requests" },
-    { key: "growth.all_bookings", label: "See all bookings", hint: "Every deal and booking, not only their own" },
     { key: "growth.trainers", label: "Browse trainers", hint: "View trainer profiles and download PDFs" },
     { key: "growth.calendar", label: "Calendar", hint: "See the training calendar" },
     { key: "growth.deal_value", label: "See deal value", hint: "Value and training outline on deals" },
@@ -45,8 +46,57 @@ const ALL_KEYS = TEAMS.flatMap((t) => ACCESS[t].map((a) => a.key));
 export const portalOf = (key: string): Team | null => TEAMS.find((t) => ACCESS[t].some((a) => a.key === key)) ?? null;
 export const allAccess = (team: Team) => ACCESS[team].map((a) => a.key);
 
-type Actor = { id: string; role: string; real_role: string; team_admin_of?: string[] | null; permissions?: string[] | null };
-type Member = { id: string; roles: string[] | null; team_admin_of?: string[] | null; permissions?: string[] | null };
+type Actor = { id: string; role: string; real_role: string; team_admin_of?: string[] | null; team_leader_of?: string[] | null; permissions?: string[] | null };
+type Member = { id: string; roles: string[] | null; team_admin_of?: string[] | null; team_leader_of?: string[] | null; reports_to?: Record<string, string> | null; permissions?: string[] | null };
+
+/* ---------- The three layers ---------- */
+
+export const LEVELS = ["admin", "leader", "member"] as const;
+export type Level = (typeof LEVELS)[number];
+export const LEVEL_LABEL: Record<Level, string> = { admin: "Portal admin", leader: "Team leader", member: "Member" };
+export const isLevel = (v: unknown): v is Level => typeof v === "string" && (LEVELS as readonly string[]).includes(v);
+
+// Someone's layer in one portal. Admin wins over leader.
+export function levelOf(m: { team_admin_of?: string[] | null; team_leader_of?: string[] | null }, team: Team): Level {
+  if ((m.team_admin_of ?? []).includes(team)) return "admin";
+  return (m.team_leader_of ?? []).includes(team) ? "leader" : "member";
+}
+
+// Who a member can be assigned to in a portal: its team leaders and its admins (an admin counts as a
+// team leader), and company admins. Never themselves.
+export function leaderOptions<T extends Member>(people: T[], team: Team, exceptId?: string): T[] {
+  return people.filter((p) => p.id !== exceptId && ((p.roles ?? []).includes("admin") || ((p.roles ?? []).includes(team) && levelOf(p, team) !== "member")));
+}
+
+// The leader a member is assigned to in a portal, if that person can still lead there.
+export function leaderOf<T extends Member>(m: Member, team: Team, people: T[]): T | null {
+  const id = m.reports_to?.[team];
+  return (id && leaderOptions(people, team, m.id).find((p) => p.id === id)) || null;
+}
+
+// A member must be assigned to one of the portal's leaders; admins and leaders are assigned to nobody.
+export function leaderError(level: Level, leaderId: string | null | undefined, options: { id: string }[]) {
+  if (level !== "member") return null;
+  if (!leaderId) return "Choose the team leader this member is assigned to.";
+  return options.some((o) => o.id === leaderId) ? null : "That team leader isn't available. Choose another one.";
+}
+
+// Which Growth deals a login sees in the view it's using: every deal (portal admins, company admins and the
+// other portals), its own and its members' (a team leader), or only its own (a member).
+export type DealScope = "all" | "team" | "own";
+export function dealScope(u: Actor): DealScope {
+  if (u.role !== "growth" || u.real_role === "admin") return "all";
+  if ((u.team_admin_of ?? []).includes("growth")) return "all";
+  return (u.team_leader_of ?? []).includes("growth") ? "team" : "own";
+}
+
+// The deal owners a login may see given who reports to it; null means everyone.
+export function visibleOwners(u: Actor, people: Member[]): string[] | null {
+  const scope = dealScope(u);
+  if (scope === "all") return null;
+  if (scope === "own") return [u.id];
+  return [u.id, ...people.filter((p) => p.id !== u.id && (p.roles ?? []).includes("growth") && p.reports_to?.growth === u.id).map((p) => p.id)];
+}
 
 // Does this login, in the view it's using now, have this access?
 export function hasAccess(u: Actor, key: string) {
@@ -65,11 +115,24 @@ export function ledTeam(u: Actor): Team | null {
   return isTeam(u.role) && (u.team_admin_of ?? []).includes(u.role) ? u.role : null;
 }
 
-// Content goes straight to the trainer when a content admin (or a company admin) submits it;
-// a content member's submission waits for a content admin's approval.
+// The portal this login is a team leader (not admin) in, in the view it's using. Leaders see their members.
+export function leaderTeam(u: Actor): Team | null {
+  return isTeam(u.role) && !ledTeam(u) && (u.team_leader_of ?? []).includes(u.role) ? u.role : null;
+}
+
+// Content goes straight to the trainer when a content admin, a content team leader or a company admin submits
+// it; a content member's submission waits for their team leader's (or a content admin's) approval.
 export function approvesContent(u: Actor) {
   if (u.role === "admin") return true;
-  return u.role === "content" && (u.real_role === "admin" || (u.team_admin_of ?? []).includes("content"));
+  return u.role === "content" && (u.real_role === "admin" || (u.team_admin_of ?? []).includes("content") || (u.team_leader_of ?? []).includes("content"));
+}
+
+// Whether this approver may approve (or send back) content that this member sent for approval:
+// admins approve anyone's, a team leader only their own members'.
+export function approvesContentOf(u: Actor, requester: { id: string; reports_to?: Record<string, string> | null } | null) {
+  if (!approvesContent(u)) return false;
+  if (u.role === "admin" || u.real_role === "admin" || (u.team_admin_of ?? []).includes("content")) return true;
+  return !!requester && requester.reports_to?.content === u.id;
 }
 
 export function canManageTeam(u: Actor, team: Team) {
@@ -78,6 +141,19 @@ export function canManageTeam(u: Actor, team: Team) {
 
 // Portal admins only lead portals they belong to.
 export const cleanTeamAdmin = (roles: string[], teamAdminOf: string[]) => TEAMS.filter((t) => roles.includes(t) && teamAdminOf.includes(t));
+
+// Team leaders too, and never in a portal they already admin.
+export const cleanTeamLeader = (roles: string[], teamLeaderOf: string[], teamAdminOf: string[]) => TEAMS.filter((t) => roles.includes(t) && teamLeaderOf.includes(t) && !teamAdminOf.includes(t));
+
+// A leader is kept only for portals where the person is a plain member.
+export function cleanReportsTo(roles: string[], reportsTo: Record<string, string> | null | undefined, teamAdminOf: string[], teamLeaderOf: string[]) {
+  const out: Record<string, string> = {};
+  for (const t of TEAMS) {
+    const id = reportsTo?.[t];
+    if (id && roles.includes(t) && !teamAdminOf.includes(t) && !teamLeaderOf.includes(t)) out[t] = id;
+  }
+  return out;
+}
 
 // Only known accesses of portals the person belongs to.
 export const cleanPermissions = (roles: string[], perms: string[]) => ALL_KEYS.filter((k) => perms.includes(k) && roles.includes(portalOf(k)!));
@@ -90,7 +166,7 @@ export function withPortalAccess(current: string[], team: Team, picked: string[]
 }
 
 // What a portal admin may not do to someone; null when allowed.
-export function memberChangeError(u: Actor, team: Team, target: Member | null, change: "remove" | "lead" | "unlead" | "invite" | "access") {
+export function memberChangeError(u: Actor, team: Team, target: Pick<Member, "id" | "roles"> | null, change: "remove" | "lead" | "unlead" | "invite" | "access") {
   if (!canManageTeam(u, team)) return "Only this portal's admins can do that.";
   if (!target || !(target.roles ?? []).includes(team)) return "That person isn't in this portal.";
   if (u.role === "admin") return null;
@@ -102,8 +178,7 @@ export function memberChangeError(u: Actor, team: Team, target: Member | null, c
 
 // What's left after someone is taken out of one portal.
 export function withoutTeam(member: Member, team: Team) {
-  const roles = (member.roles ?? []).filter((r) => r !== team);
-  return { roles, team_admin_of: cleanTeamAdmin(roles, member.team_admin_of ?? []), permissions: cleanPermissions(roles, member.permissions ?? []) };
+  return dropCategory(member, team);
 }
 
 // Where a login lands: the first page of its portal it can open.
@@ -129,7 +204,7 @@ export function homePath(u: Actor & { trainer_id?: string | null }): string {
       if (has("content.view")) return "/content";
       break;
   }
-  if (ledTeam(u)) return "/team";
+  if (ledTeam(u) || leaderTeam(u)) return "/team";
   return u.trainer_id ? "/me" : "/no-access";
 }
 
@@ -143,22 +218,37 @@ export function getsEmails(u: { team_admin_of?: string[] | null; permissions?: s
 export type Category = Team | "admin";
 export const isCategory = (v: unknown): v is Category => v === "admin" || isTeam(v);
 
-type Access = { roles: string[]; team_admin_of: string[]; permissions: string[] };
+type Access = { roles: string[]; team_admin_of: string[]; team_leader_of: string[]; reports_to: Record<string, string>; permissions: string[] };
+type AccessInput = { roles?: string[] | null; team_admin_of?: string[] | null; team_leader_of?: string[] | null; reports_to?: Record<string, string> | null; permissions?: string[] | null };
 
-// Puts someone in one category with these accesses, keeping their other categories as they are.
+function tidy(roles: string[], admins: string[], leaders: string[], reportsTo: Record<string, string> | null | undefined, permissions: string[]): Access {
+  const team_admin_of = cleanTeamAdmin(roles, admins);
+  const team_leader_of = cleanTeamLeader(roles, leaders, team_admin_of);
+  return { roles, team_admin_of, team_leader_of, reports_to: cleanReportsTo(roles, reportsTo, team_admin_of, team_leader_of), permissions: cleanPermissions(roles, permissions) };
+}
+
+// Puts someone in one category at one level with these accesses, keeping their other categories as they are.
 // A portal admin is stored with every access of the portal, so un-making them admin keeps everything on.
-export function applyCategory(cur: Partial<Access>, category: Category, picked: string[], portalAdmin: boolean): Access {
+// `level` also accepts the older true/false "portal admin" flag. A member is assigned to `leaderId`.
+export function applyCategory(cur: AccessInput, category: Category, picked: string[], level: Level | boolean, leaderId?: string | null): Access {
   const roles = [...new Set([...(cur.roles ?? []), category])];
-  if (category === "admin") return { roles, team_admin_of: cleanTeamAdmin(roles, cur.team_admin_of ?? []), permissions: cleanPermissions(roles, cur.permissions ?? []) };
-  const lead = portalAdmin ? [...(cur.team_admin_of ?? []), category] : (cur.team_admin_of ?? []).filter((t) => t !== category);
-  const permissions = withPortalAccess(cur.permissions ?? [], category, portalAdmin ? allAccess(category) : picked);
-  return { roles, team_admin_of: cleanTeamAdmin(roles, lead), permissions: cleanPermissions(roles, permissions) };
+  if (category === "admin") return tidy(roles, cur.team_admin_of ?? [], cur.team_leader_of ?? [], cur.reports_to, cur.permissions ?? []);
+  const lv: Level = level === true ? "admin" : level === false ? "member" : level;
+  const without = (list: string[] | null | undefined) => (list ?? []).filter((t) => t !== category);
+  const admins = lv === "admin" ? [...without(cur.team_admin_of), category] : without(cur.team_admin_of);
+  const leaders = lv === "leader" ? [...without(cur.team_leader_of), category] : without(cur.team_leader_of);
+  const reportsTo = { ...(cur.reports_to ?? {}) };
+  // an explicit leader replaces the old one; leaving it out keeps the assignment they had
+  if (lv !== "member") delete reportsTo[category];
+  else if (leaderId) reportsTo[category] = leaderId;
+  const permissions = withPortalAccess(cur.permissions ?? [], category, lv === "admin" ? allAccess(category) : picked);
+  return tidy(roles, admins, leaders, reportsTo, permissions);
 }
 
 // Takes someone out of one category, keeping the rest.
-export function dropCategory(cur: Partial<Access>, category: Category): Access {
+export function dropCategory(cur: AccessInput, category: Category): Access {
   const roles = (cur.roles ?? []).filter((r) => r !== category);
-  return { roles, team_admin_of: cleanTeamAdmin(roles, cur.team_admin_of ?? []), permissions: cleanPermissions(roles, cur.permissions ?? []) };
+  return tidy(roles, cur.team_admin_of ?? [], cur.team_leader_of ?? [], cur.reports_to, cur.permissions ?? []);
 }
 
 // An emailed access invite works once, for 7 days, and only for the person it was sent to.

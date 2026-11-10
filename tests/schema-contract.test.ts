@@ -24,7 +24,7 @@ const code = sourceFiles("src/").map((f) => ({ f, text: read(f) }));
 function selectedColumns(table: string) {
   const out = new Set<string>();
   const re = new RegExp(`from\\("${table}"\\)\\s*\\.select\\("([^"]+)"`, "g");
-  for (const { text } of code) for (const m of text.matchAll(re)) for (const c of m[1].split(",")) if (!c.includes("(")) out.add(c.trim());
+  for (const { text } of code) for (const m of text.matchAll(re)) for (const c of m[1].replace(/[\w:!]+\([^)]*\)/g, "").split(",")) out.add(c.trim());
   return [...out].filter((c) => c && c !== "*");
 }
 

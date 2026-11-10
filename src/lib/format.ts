@@ -73,6 +73,8 @@ export function friendlyError(msg: string | undefined) {
 }
 
 export const AUDIT_LABEL: Record<string, string> = {
+  team_feedback_added: "Team feedback added",
+  team_feedback_deleted: "Team feedback removed",
   booking_created: "Trainer booked",
   training_requested: "Training requested (Growth)",
   trainer_assigned: "Trainer assigned",

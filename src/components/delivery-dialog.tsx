@@ -28,7 +28,7 @@ function Field({ label, hint, required, children }: { label: string; hint?: stri
 
 const box = "w-full rounded-xl border border-ds-border bg-ds-surface px-3.5 py-2.5 text-sm text-ds-heading outline-none transition focus:border-ds-primary focus:ring-2 focus:ring-ds-primary/20";
 
-// The trainer marks a training day as delivered: a short report, optional notes and documents, and the audio.
+// The trainer marks a training day as delivered: a short report, plus optional notes, documents and audio.
 export function DeliveryDialog({
   bookingId,
   dayNumber,
@@ -61,7 +61,6 @@ export function DeliveryDialog({
   const [pending, start] = useTransition();
   const audios = files.filter((f) => f.audio);
   const docs = files.filter((f) => !f.audio);
-  const needsAudio = !finished && audios.length === 0;
 
   const sb = () => createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!);
 
@@ -193,10 +192,10 @@ export function DeliveryDialog({
             </Field>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className={`rounded-xl border p-4 ${needsAudio ? "border-warn/40 bg-warn-bg/40" : "border-ds-border"}`}>
+              <div className="rounded-xl border border-ds-border p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-medium text-ds-heading">
-                    Audio {!finished && <span className="text-bad">*</span>}
+                    Audio <span className="text-xs font-normal text-ds-text">(optional)</span>
                   </span>
                   {audios.length > 0 && <span className="text-xs font-medium text-good">{audios.length} added</span>}
                 </div>

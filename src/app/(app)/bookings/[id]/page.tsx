@@ -11,6 +11,9 @@ import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 import { getSetting } from "@/lib/scoring";
 import { cancelBooking, updateContact } from "../actions";
 import { EditTrainingForm } from "@/components/edit-training-form";
+import { seesDealOf } from "@/lib/team-people";
+import { TeamFeedbackCard } from "@/components/team-feedback";
+import { seesTeamFeedback } from "@/lib/team-feedback";
 
 type Log = { id: string; action: string; details: Record<string, unknown> | null; created_at: string; app_users: { full_name: string } | null };
 
@@ -21,8 +24,8 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   const { data } = await db().from("bookings").select(BOOKING_SELECT).eq("id", id).maybeSingle();
   if (!data) notFound();
   const b = data as BookingRow;
-  // Growth without "See all bookings" only opens their own requests.
-  if (me.role === "growth" && !can(me, "growth.all_bookings") && b.created_by !== me.id) notFound();
+  // A Growth member only opens their own requests, a team leader also their members'; admins open any.
+  if (!(await seesDealOf(me, b.created_by))) notFound();
   const [{ data: logs }, rule] = await Promise.all([
     db().from("audit_log").select("*, app_users(full_name)").eq("booking_id", id).order("created_at"),
     getSetting("cancellation", { notice_hours: 48, min_reason_chars: 150 }),
@@ -34,7 +37,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   const showReason = me.role === "admin";
   return (
     <div className="space-y-5">
-      {can(me, "te.dashboard") ? <Link href={`/dashboard/${b.id}`} className="text-sm text-blue hover:underline">← Dashboard</Link> : <Link href="/bookings" className="text-sm text-blue hover:underline">← All bookings</Link>}
+      {can(me, "te.dashboard") ? <Link href={`/dashboard/${b.id}`} className="text-sm text-blue hover:underline">← Dashboard</Link> : <Link href="/bookings" className="text-sm text-blue hover:underline">← Bookings</Link>}
       {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and Training Excellence was notified." : "Request sent. It's on the calendar as “Needs a trainer” and Training Excellence was notified."}</p>}
       {b.status === "needs_trainer" && canBook(me) && (
         <section className="card border-2 border-[#F4A9C4]">
@@ -47,6 +50,8 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <Ticket b={b} canUpload={me.role === "admin" && b.status !== "cancelled"} />
       {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} showValue={can(me, "te.deal_value") || can(me, "growth.deal_value")} />}
+
+      {seesTeamFeedback(me.role) && b.status !== "cancelled" && <TeamFeedbackCard booking={b} me={me} />}
 
       {ACTIVE_STATUSES.includes(b.status) && (can(me, "te.edit") || ownRequest) && (
         <section className="card">

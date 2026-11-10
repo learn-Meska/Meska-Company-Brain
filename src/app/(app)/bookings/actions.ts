@@ -12,9 +12,11 @@ import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, slotsFor, todayISO
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
 import { checkAudioFile, checkFile, isAudioPath, safeName } from "@/lib/files";
-import { audit, BOOKING_SELECT, bookingRows, notify, stepFor, trainerRecipient, usersWithRoles, type BookingRow } from "@/lib/notify";
+import { audit, BOOKING_SELECT, bookingRows, notify, stepFor, trainerRecipient, userById, usersWithRoles, type BookingRow } from "@/lib/notify";
 import { trainingTeam } from "@/lib/team";
 import { ENGAGEMENT_LABEL, readDeliveryReport, type DeliveryInput } from "@/lib/delivery";
+import { FEEDBACK_SOURCE_LABEL, FEEDBACK_TEAM_LABEL, mayDeleteFeedback, RATING_LABEL, readTeamFeedback, seesTeamFeedback } from "@/lib/team-feedback";
+import { seesDealOf } from "@/lib/team-people";
 import {
   contactError,
   contactFields,
@@ -1059,7 +1061,6 @@ export async function submitBrief(bookingId: string, input: DeliveryInput) {
   const count = paths.length - audioCount;
   const first = !r.b.finished_at;
   // Days delivered before audio was required can still update their report without it.
-  if (first && !audioCount) return { error: "The training audio is required: add it before marking the training as delivered." };
   const now = new Date().toISOString();
   // Submitting the report and audio is what marks the training day as delivered (finished_at).
   const { error } = await db()
@@ -1089,14 +1090,14 @@ export async function submitBrief(bookingId: string, input: DeliveryInput) {
         ...(audioCount ? [["Audio", `${audioCount} file${audioCount > 1 ? "s" : ""}`] as [string, string]] : []),
       ],
       content: brief || undefined,
-      next: ["Read the delivery report and listen to the audio. Participant feedback is summarised for the trainer once the form closes."],
+      next: [`Read the delivery report${audioCount ? " and listen to the audio" : " (no audio was added)"}. Participant feedback is summarised for the trainer once the form closes.`],
       button: "Read the report",
     },
   });
   revalidatePath(`/me/bookings/${bookingId}`);
   revalidatePath(`/bookings/${bookingId}`);
   revalidatePath("/dashboard", "layout");
-  return { ok: first ? "Marked as delivered. Thank you, your report and audio were sent to the team." : "Report updated and the team was notified." };
+  return { ok: first ? `Marked as delivered. Thank you, your report${audioCount ? " and audio were" : " was"} sent to the team.` : "Report updated and the team was notified." };
 }
 
 /* ---------- Delete a whole training (company admins) ---------- */
@@ -1153,4 +1154,61 @@ export async function deleteTraining(fd: FormData) {
   revalidatePath("/content", "layout");
   revalidatePath("/calendar");
   redirect("/dashboard?deleted=1");
+}
+
+/* ---------- Feedback added by Growth or Training Excellence ---------- */
+
+// Optional feedback on a training, written by hand (e.g. what the client told Growth on a call). Growth,
+// Training Excellence and admins read it; the trainer and the content team never do, and scores don't use it.
+export async function addTeamFeedback(fd: FormData) {
+  const me = await requireRole("admin", "approver", "growth");
+  if (!seesTeamFeedback(me.role)) return { error: "Training not found." };
+  const [b] = await loadBookings([String(fd.get("id"))]);
+  // Growth only on the deals it can open (its own, or its team members' for a team leader).
+  if (!b || (me.role === "approver" && !can(me, "te.dashboard")) || !(await seesDealOf(me, b.created_by))) return { error: "Training not found." };
+  const f = readTeamFeedback({ source: fd.get("source"), rating: fd.get("rating"), body: fd.get("body") });
+  if ("error" in f) return f;
+  const { error } = await db().from("training_feedback").insert({ booking_id: b.id, author_id: me.id, team: me.role, source: f.source, rating: f.rating, body: f.body });
+  if (error) return { error: friendlyError(error.message) };
+  await audit(me.id, "team_feedback_added", b.id, { program: title(b), source: f.source, rating: f.rating });
+  const team = FEEDBACK_TEAM_LABEL[me.role];
+  const to = [...(await usersWithRoles("admin", "approver")), await userById(b.created_by)].filter((u) => u && u.id !== me.id);
+  await notify(to, {
+    title: `${team} feedback added: ${b.program_name}`,
+    body: `${me.full_name} · ${FEEDBACK_SOURCE_LABEL[f.source]}${f.rating ? ` · ${f.rating}/5` : ""}`,
+    link: `/bookings/${b.id}`,
+    email: {
+      subject: `New ${team} feedback on ${b.program_name}${f.rating ? ` — ${f.rating}/5 (${RATING_LABEL[f.rating]})` : ""}`,
+      heading: `${team} added feedback on a training`,
+      step: stepFor(b),
+      intro: `<b>${esc(me.full_name)}</b> (${esc(team)}) added feedback on <b>${esc(b.program_name)}</b>. It is only visible to Growth, Training Excellence and admins, not to the trainer.`,
+      rows: [
+        ["Program", esc(b.program_name)],
+        ["Trainer", esc(b.trainers?.full_name ?? "Not assigned")],
+        ["Feedback", esc(FEEDBACK_SOURCE_LABEL[f.source])],
+        ...(f.rating ? [["Rating", `${f.rating}/5 · ${RATING_LABEL[f.rating]}`] as [string, string]] : []),
+      ],
+      content: f.body,
+      next: ["Nothing is required. Open the training to read every feedback note or add your own."],
+      button: "View the training",
+    },
+  });
+  revalidatePath(`/bookings/${b.id}`);
+  revalidatePath(`/dashboard/${b.id}`);
+  return { ok: "Feedback added. The team was notified." };
+}
+
+export async function deleteTeamFeedback(fd: FormData) {
+  const me = await requireRole("admin", "approver", "growth");
+  const id = String(fd.get("id"));
+  if (!isUuid(id)) return { error: "Feedback not found." };
+  const { data } = await db().from("training_feedback").select("id, booking_id, author_id").eq("id", id).maybeSingle();
+  const row = data as { id: string; booking_id: string; author_id: string | null } | null;
+  if (!row || !mayDeleteFeedback(me, row.author_id)) return { error: "Feedback not found." };
+  const { error } = await db().from("training_feedback").delete().eq("id", id);
+  if (error) return { error: friendlyError(error.message) };
+  await audit(me.id, "team_feedback_deleted", row.booking_id, {});
+  revalidatePath(`/bookings/${row.booking_id}`);
+  revalidatePath(`/dashboard/${row.booking_id}`);
+  return { ok: "Feedback removed." };
 }

@@ -5,6 +5,8 @@ import { AssignPanel } from "@/components/assign-panel";
 import { DownloadButton } from "@/components/booking-ui";
 import { DealCard } from "@/components/deal-card";
 import { DeliveryReportCard } from "@/components/delivery-report";
+import { TeamFeedbackCard } from "@/components/team-feedback";
+import { seesTeamFeedback } from "@/lib/team-feedback";
 import { DeleteTraining } from "@/components/delete-training";
 import { Form, Submit } from "@/components/form";
 import { SwapIcon, TrashIcon } from "@/components/icons";
@@ -164,7 +166,7 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
 
       <section className="card space-y-3">
         <h2 className="h2">Delivery reports</h2>
-        {reports.length === 0 && <p className="text-sm text-muted">Nothing yet. The trainer sends a delivery report and the audio when marking a day as delivered.</p>}
+        {reports.length === 0 && <p className="text-sm text-muted">Nothing yet. The trainer sends a delivery report (and the audio, if they recorded one) when marking a day as delivered.</p>}
         {reports.map((d) => (
           <div key={d.id} className="rounded-2xl border border-ice2 bg-ice p-4">
             <h3 className="mb-1 text-sm font-semibold">Day {d.day_number}{d.trainers?.full_name ? ` · ${d.trainers.full_name}` : ""}</h3>
@@ -178,6 +180,8 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
           </div>
         ))}
       </section>
+
+      {seesTeamFeedback(me.role) && <TeamFeedbackCard booking={b} me={me} />}
 
       <section className="card space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
