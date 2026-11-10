@@ -98,6 +98,8 @@
     "role",
     "roles",
     "team_admin_of",
+    "team_leader_of",
+    "reports_to",
     "permissions"
   ],
   "access_invites": [
@@ -105,6 +107,8 @@
     "user_id",
     "category",
     "portal_admin",
+    "team_leader",
+    "leader_id",
     "permissions",
     "token",
     "created_by",
@@ -117,6 +121,16 @@
     "recommend",
     "reason",
     "answers",
+    "created_at"
+  ],
+  "training_feedback": [
+    "id",
+    "booking_id",
+    "author_id",
+    "team",
+    "source",
+    "rating",
+    "body",
     "created_at"
   ],
   "buckets": [

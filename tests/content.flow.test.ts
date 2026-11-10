@@ -139,7 +139,7 @@ describe("content approval", () => {
 
   it("a member's submit waits for a content admin, who is emailed; the trainer isn't told", async () => {
     h.me = MEMBER;
-    expect(await submitContent(DEAL, "Draft guide")).toEqual({ ok: "Sent to the content admin for approval. You'll be told once it's approved." });
+    expect(await submitContent(DEAL, "Draft guide")).toEqual({ ok: "Sent to your team leader for approval. You'll be told once it's approved." });
     expect(h.fake.tables.deals[0]).toMatchObject({ content_review_guide: "Draft guide", content_review_requested_by: "member-1", content_submitted_at: null });
     expect(h.fake.tables.deals[0].content_guide).toBeUndefined();
     expect(h.notified).toEqual([{ to: ["lead@meska.ai"], title: "Content waiting for your approval: Aman Holding — Aman Holding HR" }]);
@@ -159,7 +159,7 @@ describe("content approval", () => {
   it("the content admin sends it back with a note; only a content admin can", async () => {
     h.me = MEMBER;
     await submitContent(DEAL, "Draft guide");
-    expect(await returnContent(DEAL, "Add a case study")).toEqual({ error: "Only a content admin can send content back." });
+    expect(await returnContent(DEAL, "Add a case study")).toEqual({ error: "Only a team leader or a content admin can send content back." });
     h.notified = [];
     h.me = LEAD_ME;
     expect(await returnContent(DEAL, "  ")).toEqual({ error: "Write what needs to change." });

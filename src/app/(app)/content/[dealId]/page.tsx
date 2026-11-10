@@ -6,7 +6,7 @@ import { ContentEditor } from "@/components/content-editor";
 import { FileBadge } from "@/components/file-badge";
 import { BuildingIcon, CalendarIcon, CheckIcon, DownloadIcon, TagIcon, UsersIcon } from "@/components/icons";
 import { can, requireAccess } from "@/lib/auth";
-import { approvesContent } from "@/lib/team-access";
+import { approvesContent, approvesContentOf } from "@/lib/team-access";
 import { fmtDate, fmtDateTime, fmtTime, isUuid } from "@/lib/format";
 import { db } from "@/lib/supabase";
 
@@ -20,7 +20,7 @@ type Deal = {
   content_review_guide: string | null;
   content_review_requested_at: string | null;
   content_review_note: string | null;
-  requester: { full_name: string } | null;
+  requester: { id: string; full_name: string; reports_to: Record<string, string> | null } | null;
 };
 type Day = { id: string; program_name: string; day_number: number; date: string; start_time: string; end_time: string; location: string | null; industry: { name: string } | null };
 type Person = { name: string; title: string | null; department: string | null };
@@ -46,7 +46,7 @@ function Progress({ hasWork, submitted }: { hasWork: boolean; submitted: boolean
   const steps = [
     { label: "Read the brief", done: true },
     { label: "Prepare content", done: hasWork || submitted },
-    { label: "Approved by a content admin", done: submitted },
+    { label: "Approved by the team leader", done: submitted },
     { label: "Submitted to the trainer", done: submitted },
   ];
   const current = steps.findIndex((s) => !s.done);
@@ -78,7 +78,7 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
   const { dealId } = await params;
   if (!isUuid(dealId)) notFound();
   const [{ data: deal }, { data: days }, { data: people }, { data: files }] = await Promise.all([
-    db().from("deals").select("id, company_name, proposal_name, proposal_size, content_guide, content_submitted_at, content_review_guide, content_review_requested_at, content_review_note, requester:app_users!deals_content_review_requested_by_fkey(full_name)").eq("id", dealId).maybeSingle(),
+    db().from("deals").select("id, company_name, proposal_name, proposal_size, content_guide, content_submitted_at, content_review_guide, content_review_requested_at, content_review_note, requester:app_users!deals_content_review_requested_by_fkey(id, full_name, reports_to)").eq("id", dealId).maybeSingle(),
     db().from("bookings").select("id, program_name, day_number, date, start_time, end_time, location, industry:lookups!bookings_industry_id_fkey(name)").eq("deal_id", dealId).neq("status", "cancelled").order("day_number"),
     db().from("deal_participants").select("name, title, department").eq("deal_id", dealId).order("position").range(0, 999),
     db().from("deal_content").select("id, file_name, size_bytes").eq("deal_id", dealId).order("created_at"),
@@ -152,7 +152,7 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
           files={fileRows}
           canWrite={can(me, "content.write")}
           canSubmit={can(me, "content.submit")}
-          approver={approvesContent(me)}
+          approver={approvesContent(me) && (!waiting || approvesContentOf(me, d.requester))}
           review={{ pendingBy: d.requester?.full_name ?? null, pendingAt: waiting ? fmtDateTime(d.content_review_requested_at!) : null, note: d.content_review_note }}
         />
 

@@ -22,7 +22,8 @@ function Note({ m }: { m: Msg }) {
 
 // The content team's workspace for one deal: write the guide, upload files, then submit so the trainer sees them.
 // canWrite: upload and remove files; canSubmit: save the guide and send it on (portal accesses).
-// approver: a content admin, whose submit goes straight to the trainer; a member's goes to a content admin first.
+// approver: a content admin or team leader, whose submit goes straight to the trainer; a member's goes to their
+// team leader (or a content admin) first.
 export function ContentEditor({
   dealId,
   initialGuide,
@@ -210,14 +211,14 @@ export function ContentEditor({
               {approver ? (
                 <><b>{review.pendingBy ?? "A team member"}</b> sent this content for your approval{review.pendingAt ? ` on ${review.pendingAt}` : ""}. Check the guide and files, edit if needed, then approve it or send it back.</>
               ) : (
-                <>Waiting for a content admin to approve{review.pendingAt ? ` (sent ${review.pendingAt})` : ""}. The trainer sees it only after approval. You can still change it and resend.</>
+                <>Waiting for the team leader or a content admin to approve{review.pendingAt ? ` (sent ${review.pendingAt})` : ""}. The trainer sees it only after approval. You can still change it and resend.</>
               )}
             </p>
           </div>
         )}
         {!waiting && review.note && (
           <div className="rounded-xl border border-warn/30 bg-warn-bg px-4 py-3 text-sm text-ds-heading">
-            <div className="font-semibold text-warn">Changes requested by the content admin</div>
+            <div className="font-semibold text-warn">Changes requested by your team leader</div>
             <p className="mt-1 whitespace-pre-line">{review.note}</p>
           </div>
         )}

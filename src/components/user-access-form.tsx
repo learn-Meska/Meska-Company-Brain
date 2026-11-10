@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { Form, Submit, type ActionResult } from "@/components/form";
 import { AwardIcon, CheckIcon, PenIcon, ShieldIcon, TrendIcon } from "@/components/icons";
-import { ACCESS, type Team } from "@/lib/team-access";
+import { ACCESS, type Level, type Team } from "@/lib/team-access";
+
+const LEVEL_CHOICES: { value: Level; label: string; blurb: string }[] = [
+  { value: "admin", label: "Portal admin", blurb: "Every access, creates accounts, sees every deal" },
+  { value: "leader", label: "Team leader", blurb: "Sees the deals of the members assigned to them" },
+  { value: "member", label: "Member", blurb: "Assigned to a team leader, sees their own deals" },
+];
 
 export type Category = Team | "admin";
 
@@ -47,6 +53,7 @@ export function UserAccessForm({
   action,
   categories,
   initial,
+  leaders,
   withWho,
   hidden,
   submitLabel,
@@ -55,7 +62,9 @@ export function UserAccessForm({
 }: {
   action: (fd: FormData) => Promise<ActionResult>;
   categories: Category[];
-  initial?: { category?: Category; access?: string[]; portalAdmin?: boolean };
+  initial?: { category?: Category; access?: string[]; level?: Level; leaderId?: string };
+  // per portal, the team leaders and admins a member can be assigned to
+  leaders?: Partial<Record<Team, { id: string; name: string }[]>>;
   withWho?: boolean;
   hidden?: Record<string, string>;
   submitLabel: string;
@@ -65,7 +74,10 @@ export function UserAccessForm({
   const locked = categories.length === 1;
   const [category, setCategory] = useState<Category | null>(initial?.category ?? (locked ? categories[0] : null));
   const [picked, setPicked] = useState<string[]>(initial?.access ?? []);
-  const [portalAdmin, setPortalAdmin] = useState(!!initial?.portalAdmin);
+  const [level, setLevel] = useState<Level>(initial?.level ?? "member");
+  const [leaderId, setLeaderId] = useState(initial?.leaderId ?? "");
+  const portalAdmin = level === "admin";
+  const leaderList = category && category !== "admin" ? (leaders?.[category] ?? []) : [];
   const list = category && category !== "admin" ? ACCESS[category] : [];
   const step = withWho ? 2 : 1;
 
@@ -74,10 +86,12 @@ export function UserAccessForm({
     // a fresh category starts with nothing ticked
     if (c !== initial?.category) {
       setPicked([]);
-      setPortalAdmin(false);
+      setLevel("member");
+      setLeaderId("");
     } else {
       setPicked(initial?.access ?? []);
-      setPortalAdmin(!!initial?.portalAdmin);
+      setLevel(initial?.level ?? "member");
+      setLeaderId(initial?.leaderId ?? "");
     }
   }
   const toggle = (key: string, on: boolean) => setPicked((p) => (on ? [...new Set([...p, key])] : p.filter((k) => k !== key)));
@@ -145,14 +159,46 @@ export function UserAccessForm({
             </div>
           ) : (
             <div className="space-y-4">
-              <label className={`flex cursor-pointer items-center gap-4 rounded-xl border p-4 ${portalAdmin ? "border-ds-primary bg-ds-primary-soft" : "border-ds-border"}`}>
-                <span className="ds-icon-soft"><ShieldIcon /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-semibold text-ds-heading">Portal admin</span>
-                  <span className="block text-sm text-ds-text">Has every access below and can add people to this portal.</span>
-                </span>
-                <Toggle name="portal_admin" value="on" checked={portalAdmin} onChange={setPortalAdmin} />
-              </label>
+<input type="hidden" name="level" value={level} />
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-ds-text">Level</div>
+                <div role="radiogroup" aria-label="Level" className="grid gap-2 sm:grid-cols-3">
+                  {LEVEL_CHOICES.map((l) => {
+                    const on = level === l.value;
+                    return (
+                      <button
+                        key={l.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        onClick={() => setLevel(l.value)}
+                        className={`rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-primary/30 ${
+                          on ? "border-ds-primary bg-ds-primary-soft ring-1 ring-ds-primary" : "border-ds-border bg-ds-surface hover:border-ds-primary/50"
+                        }`}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-ds-heading">{l.label}</span>
+                          {on && <CheckIcon className="flex-none text-ds-primary" />}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-ds-text">{l.blurb}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {level === "member" && (
+                <div className="rounded-xl border border-ds-border p-4">
+                  <label className="label" htmlFor="ua-leader">Team leader</label>
+                  <select id="ua-leader" name="leader_id" required value={leaderId} onChange={(e) => setLeaderId(e.target.value)} className="input">
+                    <option value="">Choose who this member is assigned to…</option>
+                    {leaderList.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-xs text-ds-text">The team leaders and admins of this portal. That person sees this member&apos;s deals.</p>
+                </div>
+              )}
 
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-ds-text">

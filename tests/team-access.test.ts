@@ -75,7 +75,7 @@ describe("portal accesses", () => {
 describe("categories", () => {
   it("putting someone in a category sets only that category's accesses", () => {
     const cur = { roles: ["growth"], team_admin_of: [], permissions: ["growth.calendar"] };
-    expect(applyCategory(cur, "content", ["content.view", "growth.new_deal"], false)).toEqual({ roles: ["growth", "content"], team_admin_of: [], permissions: ["growth.calendar", "content.view"] });
+    expect(applyCategory(cur, "content", ["content.view", "growth.new_deal"], false)).toEqual({ roles: ["growth", "content"], team_admin_of: [], team_leader_of: [], reports_to: {}, permissions: ["growth.calendar", "content.view"] });
     expect(applyCategory(cur, "growth", ["growth.new_deal"], false).permissions).toEqual(["growth.new_deal"]);
   });
 
@@ -87,11 +87,11 @@ describe("categories", () => {
   });
 
   it("company admin keeps the other categories untouched", () => {
-    expect(applyCategory({ roles: ["growth"], team_admin_of: ["growth"], permissions: ["growth.new_deal"] }, "admin", [], false)).toEqual({ roles: ["growth", "admin"], team_admin_of: ["growth"], permissions: ["growth.new_deal"] });
+    expect(applyCategory({ roles: ["growth"], team_admin_of: ["growth"], permissions: ["growth.new_deal"] }, "admin", [], false)).toEqual({ roles: ["growth", "admin"], team_admin_of: ["growth"], team_leader_of: [], reports_to: {}, permissions: ["growth.new_deal"] });
   });
 
   it("dropping a category removes its accesses and portal admin", () => {
-    expect(dropCategory({ roles: ["growth", "content"], team_admin_of: ["content"], permissions: ["growth.new_deal", "content.view"] }, "content")).toEqual({ roles: ["growth"], team_admin_of: [], permissions: ["growth.new_deal"] });
+    expect(dropCategory({ roles: ["growth", "content"], team_admin_of: ["content"], permissions: ["growth.new_deal", "content.view"] }, "content")).toEqual({ roles: ["growth"], team_admin_of: [], team_leader_of: [], reports_to: {}, permissions: ["growth.new_deal"] });
   });
 });
 
@@ -130,6 +130,8 @@ describe("portal team management", () => {
     expect(withoutTeam({ id: "x", roles: ["growth", "content"], team_admin_of: ["growth"], permissions: ["growth.new_deal", "content.view"] }, "growth")).toEqual({
       roles: ["content"],
       team_admin_of: [],
+      team_leader_of: [],
+      reports_to: {},
       permissions: ["content.view"],
     });
   });
@@ -159,4 +161,88 @@ describe("content approval", () => {
   it("a content member, even with Submit content, needs approval", () => expect(approvesContent(contentMember)).toBe(false));
   it("a content admin's rights count only in the content view", () => expect(approvesContent({ ...contentAdmin, role: "trainer" })).toBe(false));
   it("other portals' admins can't approve content", () => expect(approvesContent(growthLead)).toBe(false));
+});
+
+describe("three layers: portal admin, team leader, member", () => {
+  const admin = { id: "a", email: "", full_name: "A", roles: ["growth"], team_admin_of: ["growth"], team_leader_of: [] as string[], reports_to: {} as Record<string, string>, permissions: [] as string[] };
+  const leader = { ...admin, id: "l", full_name: "L", team_admin_of: [] as string[], team_leader_of: ["growth"], permissions: ["growth.new_deal"] };
+  const mine = { ...leader, id: "m1", full_name: "M1", team_leader_of: [] as string[], reports_to: { growth: "l" } as Record<string, string> };
+  const other = { ...mine, id: "m2", full_name: "M2", reports_to: { growth: "a" } as Record<string, string> };
+  const boss = { ...admin, id: "boss", full_name: "Boss", roles: ["admin"], team_admin_of: [] as string[] };
+  const contentLeader = { ...boss, id: "cl", full_name: "CL", roles: ["content"], team_leader_of: ["content"] };
+  const people = [admin, leader, mine, other, boss, contentLeader];
+  const actor = (p: (typeof people)[number], role = "growth") => ({ ...p, role, real_role: p.roles.includes("admin") ? "admin" : role });
+
+  it("works out each person's level in a portal", async () => {
+    const { levelOf } = await import("../src/lib/team-access");
+    expect([admin, leader, mine].map((p) => levelOf(p, "growth"))).toEqual(["admin", "leader", "member"]);
+    expect(levelOf(leader, "content")).toBe("member");
+  });
+
+  it("a member can be assigned to the portal's team leaders and admins, and company admins, never themselves", async () => {
+    const { leaderOptions, leaderError } = await import("../src/lib/team-access");
+    expect(leaderOptions(people, "growth").map((p) => p.id)).toEqual(["a", "l", "boss"]);
+    expect(leaderOptions(people, "growth", "l").map((p) => p.id)).toEqual(["a", "boss"]);
+    expect(leaderOptions(people, "content").map((p) => p.id)).toEqual(["boss", "cl"]);
+    const options = leaderOptions(people, "growth");
+    expect(leaderError("member", null, options)).toMatch(/Choose the team leader/);
+    expect(leaderError("member", "m2", options)).toMatch(/isn't available/);
+    expect(leaderError("member", "l", options)).toBeNull();
+    expect(leaderError("leader", null, options)).toBeNull();
+    expect(leaderError("admin", null, options)).toBeNull();
+  });
+
+  it("the admin sees every deal, a team leader their own and their members', a member only their own", async () => {
+    const { dealScope, visibleOwners } = await import("../src/lib/team-access");
+    expect(dealScope(actor(admin))).toBe("all");
+    expect(visibleOwners(actor(admin), people)).toBeNull();
+    expect(dealScope(actor(leader))).toBe("team");
+    expect(visibleOwners(actor(leader), people)).toEqual(["l", "m1"]);
+    expect(dealScope(actor(mine))).toBe("own");
+    expect(visibleOwners(actor(mine), people)).toEqual(["m1"]);
+    // company admins (also previewing Growth) and the other portals see every deal
+    expect(visibleOwners(actor(boss, "admin"), people)).toBeNull();
+    expect(visibleOwners(actor(boss), people)).toBeNull();
+    expect(visibleOwners({ ...actor(mine), role: "approver" }, people)).toBeNull();
+  });
+
+  it("a leader who is demoted no longer counts as anyone's leader", async () => {
+    const { leaderOf } = await import("../src/lib/team-access");
+    expect(leaderOf(mine, "growth", people)?.id).toBe("l");
+    const demoted = people.map((p) => (p.id === "l" ? { ...p, team_leader_of: [] } : p));
+    expect(leaderOf(mine, "growth", demoted)).toBeNull();
+  });
+
+  it("setting a level stores it, and a member's leader; admins and leaders report to nobody", () => {
+    const base = { roles: ["growth"], team_admin_of: [], team_leader_of: [], reports_to: {}, permissions: [] };
+    const member = applyCategory(base, "growth", ["growth.new_deal"], "member", "l");
+    expect(member).toMatchObject({ team_admin_of: [], team_leader_of: [], reports_to: { growth: "l" }, permissions: ["growth.new_deal"] });
+    const promoted = applyCategory(member, "growth", ["growth.new_deal"], "leader");
+    expect(promoted).toMatchObject({ team_leader_of: ["growth"], reports_to: {}, permissions: ["growth.new_deal"] });
+    const asAdmin = applyCategory(promoted, "growth", [], "admin");
+    expect(asAdmin).toMatchObject({ team_admin_of: ["growth"], team_leader_of: [], reports_to: {} });
+    // saving a member's accesses without naming a leader keeps the one they had
+    expect(applyCategory(member, "growth", ["growth.calendar"], "member").reports_to).toEqual({ growth: "l" });
+    // leaving the portal drops the leader too
+    expect(dropCategory(member, "growth")).toMatchObject({ roles: [], reports_to: {} });
+  });
+
+  it("a team leader gets My team for their members but is not the portal's admin", async () => {
+    const { leaderTeam } = await import("../src/lib/team-access");
+    expect(leaderTeam(actor(leader))).toBe("growth");
+    expect(ledTeam(actor(leader))).toBeNull();
+    expect(canManageTeam(actor(leader), "growth")).toBe(false);
+    expect(leaderTeam(actor(admin))).toBeNull();
+    expect(leaderTeam(actor(mine))).toBeNull();
+  });
+
+  it("content: a team leader submits straight away and approves only their own members", async () => {
+    const { approvesContentOf } = await import("../src/lib/team-access");
+    const cl = actor(contentLeader, "content");
+    expect(approvesContent(cl)).toBe(true);
+    expect(approvesContentOf(cl, { id: "x", reports_to: { content: "cl" } })).toBe(true);
+    expect(approvesContentOf(cl, { id: "y", reports_to: { content: "someone-else" } })).toBe(false);
+    const ca = { id: "ca", role: "content", real_role: "content", team_admin_of: ["content"], permissions: [] };
+    expect(approvesContentOf(ca, { id: "y", reports_to: { content: "someone-else" } })).toBe(true);
+  });
 });

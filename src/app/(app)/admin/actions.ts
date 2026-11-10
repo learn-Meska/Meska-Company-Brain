@@ -9,7 +9,8 @@ import { isUuid } from "@/lib/format";
 import { hasUnprintable } from "@/lib/pdf-text";
 import { ensureAuthUser, rolesText, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
 import { sendAccessInvite } from "@/lib/access-invite";
-import { applyCategory, cleanPermissions, dropCategory, isCategory, TEAM_LABEL, type Category } from "@/lib/team-access";
+import { applyCategory, cleanPermissions, dropCategory, isCategory, isLevel, leaderError, leaderOptions, TEAM_LABEL, type Category, type Level } from "@/lib/team-access";
+import { teamPeople } from "@/lib/team-people";
 import { audit } from "@/lib/notify";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -182,14 +183,25 @@ async function sendTrainerAccess(email: string, name: string) {
 }
 
 const pickAccess = (fd: FormData) => fd.getAll("access").map(String);
-const isPortalAdmin = (fd: FormData) => fd.get("portal_admin") === "on";
+// The layer in the portal (admin, team leader or member) and, for a member, the leader they're assigned to.
+const levelOf = (fd: FormData): Level => {
+  const v = fd.get("level");
+  return isLevel(v) ? v : "member";
+};
+const leaderIdOf = (fd: FormData, level: Level) => (level === "member" ? str(fd, "leader_id") || null : null);
+// A member must be assigned to one of the portal's team leaders or admins (never themselves).
+async function leaderProblem(category: Category, level: Level, leaderId: string | null, memberId?: string) {
+  if (category === "admin") return null;
+  return leaderError(level, leaderId, leaderOptions(await teamPeople(), category, memberId));
+}
 const isStaffRoles = (roles: string[]) => roles.some((r) => (STAFF_ROLES as readonly string[]).includes(r));
 const CATEGORY_TEXT: Record<Category, string> = { ...TEAM_LABEL, admin: "Admin" };
-type AccessRow = { roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
-const accessOf = (r: AccessRow | null) => ({ roles: r?.roles ?? [], team_admin_of: r?.team_admin_of ?? [], permissions: r?.permissions ?? [] });
+type AccessRow = { roles: string[] | null; team_admin_of: string[] | null; team_leader_of: string[] | null; reports_to: Record<string, string> | null; permissions: string[] | null };
+const ACCESS_COLS = "roles, team_admin_of, team_leader_of, reports_to, permissions";
+const accessOf = (r: AccessRow | null) => ({ roles: r?.roles ?? [], team_admin_of: r?.team_admin_of ?? [], team_leader_of: r?.team_leader_of ?? [], reports_to: r?.reports_to ?? {}, permissions: r?.permissions ?? [] });
 
-function accessError(category: Category, picked: string[], portalAdmin: boolean) {
-  if (category === "admin" || portalAdmin) return null;
+function accessError(category: Category, picked: string[], level: Level) {
+  if (category === "admin" || level === "admin") return null;
   return cleanPermissions([category], picked).length ? null : "Turn on at least one access, or make them portal admin.";
 }
 
@@ -199,15 +211,15 @@ async function signsIn(id: string) {
 }
 
 // Emails a confirmation link for a new category; the access is added only once they confirm.
-async function askToConfirm(me: { id: string; full_name: string }, user: { id: string; email: string; full_name: string }, category: Category, picked: string[], portalAdmin: boolean, back = "/admin/users") {
+async function askToConfirm(me: { id: string; full_name: string }, user: { id: string; email: string; full_name: string }, category: Category, picked: string[], level: Level, leaderId: string | null, back = "/admin/users") {
   let sent = true;
   try {
-    sent = await sendAccessInvite({ user, category, portalAdmin, picked, by: me });
+    sent = await sendAccessInvite({ user, category, level, leaderId, picked, by: me });
   } catch (e) {
     console.error("[askToConfirm]", e instanceof Error ? e.message : e);
     return { error: "Couldn't create the confirmation. Please try again." };
   }
-  await audit(me.id, "access_invited", null, { id: user.id, category, portal_admin: portalAdmin });
+  await audit(me.id, "access_invited", null, { id: user.id, category, level, leader: leaderId });
   revalidatePath("/admin/users");
   redirect(`${back}?${new URLSearchParams({ pending: user.full_name, category: CATEGORY_TEXT[category], ...(sent ? {} : { unsent: user.email }) })}`);
 }
@@ -223,16 +235,19 @@ export async function addTeamMember(fd: FormData) {
   if (full_name.length > 120) return { error: "Keep the name under 120 characters." };
   if (!isCategory(category)) return { error: "Choose a category." };
   const picked = pickAccess(fd);
-  const portalAdmin = isPortalAdmin(fd);
-  const bad = accessError(category, picked, portalAdmin);
+  const level = levelOf(fd);
+  const leaderId = leaderIdOf(fd, level);
+  const bad = accessError(category, picked, level);
   if (bad) return { error: bad };
-  const { data: existing } = await db().from("app_users").select("id, full_name, roles, team_admin_of, permissions").eq("email", email).maybeSingle();
+  const { data: existing } = await db().from("app_users").select(`id, full_name, ${ACCESS_COLS}`).eq("email", email).maybeSingle();
   const cur = existing as (AccessRow & { id: string; full_name: string }) | null;
+  const noLeader = await leaderProblem(category, level, leaderId, cur?.id);
+  if (noLeader) return { error: noLeader };
   // Someone who already has a login (a company admin, another portal's member, a trainer who signs in) must
   // confirm the new category from an email before it's added. Yourself included.
   if (cur && (isStaffRoles(cur.roles ?? []) || (await signsIn(cur.id)))) {
     if ((cur.roles ?? []).includes(category)) return { error: `They already have ${CATEGORY_TEXT[category]}. Open them in the list to change their access.` };
-    return askToConfirm(me, { id: cur.id, email, full_name: cur.full_name }, category, picked, portalAdmin);
+    return askToConfirm(me, { id: cur.id, email, full_name: cur.full_name }, category, picked, level, leaderId);
   }
   let sent = true;
   try {
@@ -240,12 +255,12 @@ export async function addTeamMember(fd: FormData) {
     // A previously removed member was blocked from signing in; adding them back lifts that.
     await db().auth.admin.updateUserById(id, { ban_duration: "none" });
     // A trainer being added to the team keeps the trainer pages.
-    const next = applyCategory(accessOf(cur), category, picked, portalAdmin);
+    const next = applyCategory(accessOf(cur), category, picked, level, leaderId);
     const { error } = await db()
       .from("app_users")
       .upsert({ id, email, full_name, role: mainRole(next.roles), ...next });
     if (error) return failed("addTeamMember", error);
-    await audit(me.id, "team_member_added", null, { email, category, portal_admin: portalAdmin, access: next.permissions });
+    await audit(me.id, "team_member_added", null, { email, category, level, leader: leaderId, access: next.permissions });
     try {
       await sendInvite(email, full_name, CATEGORY_TEXT[category]);
     } catch (e) {
@@ -268,19 +283,21 @@ export async function updateTeamMember(fd: FormData) {
   if (!isUuid(id)) return { error: "Member not found." };
   if (!isCategory(category)) return { error: "Choose a category." };
   const picked = pickAccess(fd);
-  const portalAdmin = isPortalAdmin(fd);
-  const bad = accessError(category, picked, portalAdmin);
+  const level = levelOf(fd);
+  const leaderId = leaderIdOf(fd, level);
+  const bad = accessError(category, picked, level) ?? (await leaderProblem(category, level, leaderId, id));
   if (bad) return { error: bad };
-  const { data } = await db().from("app_users").select("email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle();
+  const { data } = await db().from("app_users").select(`email, full_name, ${ACCESS_COLS}`).eq("id", id).maybeSingle();
   if (!data) return { error: "Member not found." };
   const row = data as AccessRow & { email: string; full_name: string };
   // A category they don't have yet must be confirmed by them first; changing an existing one applies now.
-  if (!(row.roles ?? []).includes(category)) return askToConfirm(me, { id, email: row.email, full_name: row.full_name }, category, picked, portalAdmin, `/admin/users/${id}`);
-  const next = applyCategory(accessOf(row), category, picked, portalAdmin);
+  if (!(row.roles ?? []).includes(category)) return askToConfirm(me, { id, email: row.email, full_name: row.full_name }, category, picked, level, leaderId, `/admin/users/${id}`);
+  const next = applyCategory(accessOf(row), category, picked, level, leaderId);
   const { error } = await db().from("app_users").update({ role: mainRole(next.roles), ...next }).eq("id", id);
   if (error) return failed("updateTeamMember", error);
-  await audit(me.id, "team_admin_changed", null, { id, category, portal_admin: portalAdmin, access: next.permissions });
+  await audit(me.id, "team_admin_changed", null, { id, category, level, leader: leaderId, access: next.permissions });
   revalidatePath("/admin/users");
+  revalidatePath("/team");
   redirect(`/admin/users/${id}?category=${category}&saved=1`);
 }
 
@@ -291,7 +308,7 @@ export async function removeFromCategory(fd: FormData) {
   const category = str(fd, "category");
   if (!isUuid(id) || !isCategory(category)) return { error: "Member not found." };
   if (id === me.id && category === "admin") return { error: "You can't remove your own admin access." };
-  const { data } = await db().from("app_users").select("roles, team_admin_of, permissions").eq("id", id).maybeSingle();
+  const { data } = await db().from("app_users").select(ACCESS_COLS).eq("id", id).maybeSingle();
   if (!data) return { error: "Member not found." };
   const next = dropCategory(accessOf(data as AccessRow), category);
   if (!isStaffRoles(next.roles)) return { error: "This is their only category. Use “Remove user” instead." };
@@ -315,7 +332,7 @@ export async function removeTeamMember(fd: FormData) {
   const { data: t } = await db().from("trainers").select("id").eq("user_id", id).maybeSingle();
   const { error } = await db()
     .from("app_users")
-    .update({ role: "trainer", roles: [], team_admin_of: [], permissions: [], can_manage_trainers: false })
+    .update({ role: "trainer", roles: [], team_admin_of: [], team_leader_of: [], reports_to: {}, permissions: [], can_manage_trainers: false })
     .eq("id", id);
   if (error) return failed("removeTeamMember", error);
   if (!t) {

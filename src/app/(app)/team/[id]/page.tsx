@@ -5,13 +5,12 @@ import { Form, Submit } from "@/components/form";
 import { Banner } from "@/components/people-table";
 import { UserAccessForm } from "@/components/user-access-form";
 import { requireUser } from "@/lib/auth";
-import { db } from "@/lib/supabase";
 import { isUuid } from "@/lib/format";
-import { ledTeam, memberChangeError, TEAM_LABEL } from "@/lib/team-access";
+import { ledTeam, levelOf, memberChangeError, TEAM_LABEL } from "@/lib/team-access";
 import { activeLoginIds } from "@/lib/team-invite";
+import { leaderChoices, teamPeople } from "@/lib/team-people";
 import { removeFromMyTeam, resendMyTeamInvite, setMemberAccess } from "../actions";
 
-type M = { id: string; email: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
 
 export default async function MemberPage({ params, searchParams }: PageProps<"/team/[id]">) {
   const me = await requireUser();
@@ -20,8 +19,8 @@ export default async function MemberPage({ params, searchParams }: PageProps<"/t
   const { id } = await params;
   const { saved } = await searchParams;
   if (!isUuid(id)) notFound();
-  const [{ data }, active] = await Promise.all([db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle(), activeLoginIds()]);
-  const m = data as M | null;
+  const [people, active] = await Promise.all([teamPeople(), activeLoginIds()]);
+  const m = people.find((p) => p.id === id);
   if (!m || !(m.roles ?? []).includes(team)) notFound();
   const label = TEAM_LABEL[team];
   const blocked = memberChangeError(me, team, m, "access");
@@ -38,7 +37,8 @@ export default async function MemberPage({ params, searchParams }: PageProps<"/t
         <UserAccessForm
           action={setMemberAccess}
           categories={[team]}
-          initial={{ category: team, access: m.permissions ?? [], portalAdmin: (m.team_admin_of ?? []).includes(team) }}
+          initial={{ category: team, access: m.permissions ?? [], level: levelOf(m, team), leaderId: m.reports_to?.[team] ?? "" }}
+          leaders={leaderChoices(people, m.id)}
           hidden={{ id: m.id }}
           submitLabel="Save access"
           pendingLabel="Saving…"

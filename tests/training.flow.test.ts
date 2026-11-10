@@ -184,9 +184,10 @@ describe("marking a day as delivered", () => {
   });
 
   const report = (over: Record<string, string> = {}) => ({ attended: "18", topics: "Prompting basics", engagement: "4", challenges: "", follow_up: "", brief: "It went well.", ...over });
-  it("needs the audio", async () => {
-    expect(await submitBrief(TODAY_DAY, report())).toEqual({ error: expect.stringMatching(/audio is required/) });
-    expect(row(TODAY_DAY).finished_at).toBeNull();
+  it("the audio is optional: a day is delivered with the report alone", async () => {
+    expect(await submitBrief(TODAY_DAY, report())).toEqual({ ok: expect.stringMatching(/Marked as delivered.*report was sent/) });
+    expect(row(TODAY_DAY).finished_at).toEqual(expect.any(String));
+    expect(h.audits).toEqual(["brief_submitted"]);
   });
   it("needs the delivery report: attendance, topics and engagement", async () => {
     await addAudio();

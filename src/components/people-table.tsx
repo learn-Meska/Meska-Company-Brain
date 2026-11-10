@@ -1,18 +1,22 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ChevronRightIcon } from "@/components/icons";
-import { ACCESS, TEAM_LABEL, type Team } from "@/lib/team-access";
+import { ACCESS, LEVEL_LABEL, TEAM_LABEL, type Level, type Team } from "@/lib/team-access";
 
 export type Person = { id: string; full_name: string; email: string; chips: ReactNode; active: boolean; you?: boolean };
 
-// Someone's access in one portal as a chip: "Growth · Portal admin" or "Content · 3 of 4".
-export function AccessChip({ team, picked, isAdmin }: { team: Team; picked: string[]; isAdmin: boolean }) {
+// Someone's access in one portal as chips: "Growth · Portal admin", "Growth · Team leader · 3 of 5" or
+// "Content · 3 of 4" followed by the leader a member is assigned to.
+export function AccessChip({ team, picked, level, leader }: { team: Team; picked: string[]; level: Level; leader?: string | null }) {
   const total = ACCESS[team].length;
   const n = ACCESS[team].filter((a) => picked.includes(a.key)).length;
   return (
-    <span className={isAdmin ? "ds-chip" : "ds-badge"}>
-      {TEAM_LABEL[team]} · {isAdmin ? "Portal admin" : `${n} of ${total}`}
-    </span>
+    <>
+      <span className={level === "member" ? "ds-badge" : "ds-chip"}>
+        {TEAM_LABEL[team]} · {level === "admin" ? LEVEL_LABEL.admin : level === "leader" ? `${LEVEL_LABEL.leader} · ${n} of ${total}` : `${n} of ${total}`}
+      </span>
+      {level === "member" && (leader ? <span className="ds-badge">Reports to {leader}</span> : <span className="badge bg-warn-bg text-warn">No team leader</span>)}
+    </>
   );
 }
 
@@ -21,7 +25,9 @@ export function Banner({ children, tone = "good" }: { children: ReactNode; tone?
 }
 
 // The people list: one row per person, the whole row opens their page.
-export function PeopleTable({ people, hrefFor, empty }: { people: Person[]; hrefFor: (id: string) => string; empty: string }) {
+// Without hrefFor the rows are read-only (a team leader's view of their members).
+export function PeopleTable({ people, hrefFor, empty }: { people: Person[]; hrefFor?: (id: string) => string; empty: string }) {
+  const ROW = "grid gap-2 px-5 py-4 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_24px] md:items-center md:gap-4";
   return (
     <section className="ds-card overflow-hidden">
       <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_24px] gap-4 border-b border-ds-border bg-ds-subtle/60 px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-ds-text md:grid">
@@ -36,7 +42,7 @@ export function PeopleTable({ people, hrefFor, empty }: { people: Person[]; href
         <ul className="divide-y divide-ds-border">
           {people.map((p) => (
             <li key={p.id}>
-              <Link href={hrefFor(p.id)} className="grid gap-2 px-5 py-4 transition hover:bg-ds-primary-soft/50 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_24px] md:items-center md:gap-4">
+              <Row href={hrefFor?.(p.id)} className={ROW}>
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-ds-heading">
                     {p.full_name} {p.you && <span className="text-xs font-normal text-ds-text">(you)</span>}
@@ -50,12 +56,16 @@ export function PeopleTable({ people, hrefFor, empty }: { people: Person[]; href
                     {p.active ? "Active" : "Invited"}
                   </span>
                 </span>
-                <ChevronRightIcon className="hidden text-ds-text md:block" />
-              </Link>
+                {hrefFor ? <ChevronRightIcon className="hidden text-ds-text md:block" /> : <span />}
+              </Row>
             </li>
           ))}
         </ul>
       )}
     </section>
   );
+}
+
+function Row({ href, className, children }: { href?: string; className: string; children: ReactNode }) {
+  return href ? <Link href={href} className={`${className} transition hover:bg-ds-primary-soft/50`}>{children}</Link> : <div className={className}>{children}</div>;
 }

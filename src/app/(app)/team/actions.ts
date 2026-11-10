@@ -6,14 +6,17 @@ import { mainRole, requireUser, type CurrentUser } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { isUuid } from "@/lib/format";
 import { audit } from "@/lib/notify";
-import { applyCategory, cleanPermissions, ledTeam, memberChangeError, TEAM_LABEL, withoutTeam, type Team } from "@/lib/team-access";
+import { applyCategory, cleanPermissions, isLevel, leaderError, leaderOptions, ledTeam, memberChangeError, TEAM_LABEL, withoutTeam, type Level, type Team } from "@/lib/team-access";
+import { teamPeople } from "@/lib/team-people";
 import { ensureAuthUser, sendInvite, STAFF_ROLES } from "@/lib/team-invite";
 import { sendAccessInvite } from "@/lib/access-invite";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Member = { id: string; email: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null };
+type AccessRow = { roles: string[] | null; team_admin_of: string[] | null; team_leader_of: string[] | null; reports_to: Record<string, string> | null; permissions: string[] | null };
+type Member = { id: string; email: string; full_name: string } & AccessRow;
+const ACCESS_COLS = "roles, team_admin_of, team_leader_of, reports_to, permissions";
 
 // Every action here works on the team the signed-in team admin is leading right now.
 async function requireTeamAdmin(): Promise<{ me: CurrentUser; team: Team }> {
@@ -25,7 +28,7 @@ async function requireTeamAdmin(): Promise<{ me: CurrentUser; team: Team }> {
 
 async function loadMember(id: string) {
   if (!isUuid(id)) return null;
-  const { data } = await db().from("app_users").select("id, email, full_name, roles, team_admin_of, permissions").eq("id", id).maybeSingle();
+  const { data } = await db().from("app_users").select(`id, email, full_name, ${ACCESS_COLS}`).eq("id", id).maybeSingle();
   return (data as Member | null) ?? null;
 }
 
@@ -34,10 +37,19 @@ function refresh() {
   revalidatePath("/admin/users");
 }
 
-const isPortalAdmin = (fd: FormData) => fd.get("portal_admin") === "on";
-const accessOf = (r: { roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null } | null) => ({
+// The layer in this portal (admin, team leader or member) and, for a member, the leader they're assigned to.
+const levelOf = (fd: FormData): Level => {
+  const v = fd.get("level");
+  return isLevel(v) ? v : "member";
+};
+const leaderIdOf = (fd: FormData, level: Level) => (level === "member" ? str(fd, "leader_id") || null : null);
+// A member must be assigned to one of this portal's team leaders or admins (never themselves).
+const leaderProblem = async (team: Team, level: Level, leaderId: string | null, memberId?: string) => leaderError(level, leaderId, leaderOptions(await teamPeople(), team, memberId));
+const accessOf = (r: AccessRow | null) => ({
   roles: r?.roles ?? [],
   team_admin_of: r?.team_admin_of ?? [],
+  team_leader_of: r?.team_leader_of ?? [],
+  reports_to: r?.reports_to ?? {},
   permissions: r?.permissions ?? [],
 });
 
@@ -45,7 +57,9 @@ export async function addToMyTeam(fd: FormData) {
   const { me, team } = await requireTeamAdmin();
   const email = str(fd, "email").toLowerCase();
   const full_name = str(fd, "full_name");
-  const portalAdmin = isPortalAdmin(fd);
+  const level = levelOf(fd);
+  const leaderId = leaderIdOf(fd, level);
+  const portalAdmin = level === "admin";
   const picked = fd.getAll("access").map(String);
   if (!email || !full_name) return { error: "Enter a name and email." };
   if (!EMAIL.test(email)) return { error: "Enter a valid email address." };
@@ -53,10 +67,12 @@ export async function addToMyTeam(fd: FormData) {
   if (!portalAdmin && !cleanPermissions([team], picked).length) return { error: "Turn on at least one access, or make them portal admin." };
   const label = TEAM_LABEL[team];
 
-  const { data: existing } = await db().from("app_users").select("id, full_name, roles, team_admin_of, permissions").eq("email", email).maybeSingle();
-  const cur = existing as { id: string; full_name: string; roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null } | null;
+  const { data: existing } = await db().from("app_users").select(`id, full_name, ${ACCESS_COLS}`).eq("email", email).maybeSingle();
+  const cur = existing as ({ id: string; full_name: string } & AccessRow) | null;
   const held = cur?.roles ?? [];
   if (held.includes(team)) return { error: `That person is already in ${label}.` };
+  const noLeader = await leaderProblem(team, level, leaderId, cur?.id);
+  if (noLeader) return { error: noLeader };
   // Someone who already has a login must confirm joining this team from an email; nothing changes until then.
   const alreadyStaff = held.some((r) => (STAFF_ROLES as readonly string[]).includes(r));
   if (cur) {
@@ -64,12 +80,12 @@ export async function addToMyTeam(fd: FormData) {
     if (alreadyStaff || authUser?.user?.last_sign_in_at) {
       let told = true;
       try {
-        told = await sendAccessInvite({ user: { id: cur.id, email, full_name: cur.full_name }, category: team, portalAdmin, picked, by: me });
+        told = await sendAccessInvite({ user: { id: cur.id, email, full_name: cur.full_name }, category: team, level, leaderId, picked, by: me });
       } catch (e) {
         console.error("[addToMyTeam invite]", e instanceof Error ? e.message : e);
         return { error: "Couldn't send the confirmation. Please try again." };
       }
-      await audit(me.id, "access_invited", null, { id: cur.id, category: team, portal_admin: portalAdmin, by_portal_admin: true });
+      await audit(me.id, "access_invited", null, { id: cur.id, category: team, level, leader: leaderId, by_portal_admin: true });
       refresh();
       redirect(`/team?${new URLSearchParams(told ? { pending: cur.full_name } : { unsent: email })}`);
     }
@@ -79,7 +95,7 @@ export async function addToMyTeam(fd: FormData) {
     const { id } = await ensureAuthUser(email);
     // A previously removed member was blocked from signing in; adding them back lifts that.
     await db().auth.admin.updateUserById(id, { ban_duration: "none" });
-    const next = applyCategory(accessOf(cur), team, picked, portalAdmin);
+    const next = applyCategory(accessOf(cur), team, picked, level, leaderId);
     const { error } = await db()
       .from("app_users")
       .upsert({ id, email, full_name: cur?.full_name ?? full_name, role: mainRole(next.roles), ...next });
@@ -87,7 +103,7 @@ export async function addToMyTeam(fd: FormData) {
       console.error("[addToMyTeam]", error.message);
       return { error: "Couldn't save. Please try again." };
     }
-    await audit(me.id, "team_member_added", null, { email, category: team, portal_admin: portalAdmin, access: next.permissions, by_portal_admin: true });
+    await audit(me.id, "team_member_added", null, { email, category: team, level, leader: leaderId, access: next.permissions, by_portal_admin: true });
     try {
       await sendInvite(email, full_name, label);
     } catch (e) {
@@ -108,16 +124,23 @@ export async function setMemberAccess(fd: FormData) {
   const m = await loadMember(str(fd, "id"));
   const err = memberChangeError(me, team, m, "access");
   if (err || !m) return { error: err ?? "Member not found." };
-  const portalAdmin = isPortalAdmin(fd);
+  const level = levelOf(fd);
+  const leaderId = leaderIdOf(fd, level);
   const picked = fd.getAll("access").map(String);
-  if (!portalAdmin && !cleanPermissions([team], picked).length) return { error: "Turn on at least one access, or remove them from the team." };
-  const next = applyCategory(accessOf(m), team, picked, portalAdmin);
-  const { error } = await db().from("app_users").update({ team_admin_of: next.team_admin_of, permissions: next.permissions }).eq("id", m.id).contains("roles", [team]);
+  if (level !== "admin" && !cleanPermissions([team], picked).length) return { error: "Turn on at least one access, or remove them from the team." };
+  const noLeader = await leaderProblem(team, level, leaderId, m.id);
+  if (noLeader) return { error: noLeader };
+  const next = applyCategory(accessOf(m), team, picked, level, leaderId);
+  const { error } = await db()
+    .from("app_users")
+    .update({ team_admin_of: next.team_admin_of, team_leader_of: next.team_leader_of, reports_to: next.reports_to, permissions: next.permissions })
+    .eq("id", m.id)
+    .contains("roles", [team]);
   if (error) {
     console.error("[setMemberAccess]", error.message);
     return { error: "Couldn't save. Please try again." };
   }
-  await audit(me.id, "team_admin_changed", null, { id: m.id, category: team, portal_admin: portalAdmin, access: next.permissions });
+  await audit(me.id, "team_admin_changed", null, { id: m.id, category: team, level, leader: leaderId, access: next.permissions });
   refresh();
   redirect(`/team/${m.id}?saved=1`);
 }
@@ -131,7 +154,7 @@ export async function removeFromMyTeam(fd: FormData) {
   const next = withoutTeam(m, team);
   const { error } = await db()
     .from("app_users")
-    .update({ roles: next.roles, team_admin_of: next.team_admin_of, permissions: next.permissions, role: mainRole(next.roles) })
+    .update({ roles: next.roles, team_admin_of: next.team_admin_of, team_leader_of: next.team_leader_of, reports_to: next.reports_to, permissions: next.permissions, role: mainRole(next.roles) })
     .eq("id", m.id)
     // only if they're still in the team we checked
     .contains("roles", [team]);

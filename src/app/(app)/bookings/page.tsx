@@ -2,7 +2,9 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { AutoSelect } from "@/components/auto-select";
 import { TrainingRow } from "@/components/training-row";
-import { can, requireRole } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
+import { dealScope } from "@/lib/team-access";
+import { growthOwnerIds } from "@/lib/team-people";
 import { buildTrainings, CONFIRMATION_FILTERS, CONTENT_LABEL, confirmationFilter, isConfirmationFilter, isContentFilter, isStage, STAGE_LABEL, type CycleDay, type CycleDeal, type Stage } from "@/lib/cycle";
 import { isAudioPath } from "@/lib/files";
 import { isUuid, todayISO } from "@/lib/format";
@@ -13,10 +15,13 @@ const DAY_SELECT =
   "id, deal_id, batch_id, program_name, day_number, date, start_time, end_time, status, trainer_id, created_by, created_at, trainer_comment, trainer_responded_at, finished_at, brief_submitted_at, trainers(full_name), industry:lookups!bookings_industry_id_fkey(name)";
 
 // Growth's bookings, laid out like the Training Excellence dashboard: one row per training (a deal or a
-// multi-day request), not one row per day. Growth without "See all bookings" sees only their own requests.
+// multi-day request), not one row per day. A Growth member sees their own requests, a team leader also their
+// members', and the portal admin (and company admins) every one.
 export default async function BookingsPage({ searchParams }: PageProps<"/bookings">) {
   const me = await requireRole("admin", "approver", "growth");
-  const onlyMine = me.role === "growth" && !can(me, "growth.all_bookings");
+  const scope = dealScope(me);
+  const onlyMine = scope === "own";
+  const owners = await growthOwnerIds(me);
   const params = await searchParams;
   const stage = isStage(params.stage) ? params.stage : null;
   const growth = !onlyMine && isUuid(params.growth) ? params.growth : "";
@@ -27,18 +32,18 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
   const [days, deals, files, feedback, audio, users] = await Promise.all([
     fetchAll<CycleDay>((from, to) => {
       const q = db().from("bookings").select(DAY_SELECT);
-      return (onlyMine ? q.eq("created_by", me.id) : q).order("id").range(from, to);
+      return (owners ? q.in("created_by", owners) : q).order("id").range(from, to);
     }),
     fetchAll<CycleDeal>((from, to) => {
       const q = db().from("deals").select("id, company_name, content_guide, content_submitted_at, created_at");
-      return (onlyMine ? q.eq("created_by", me.id) : q).order("id").range(from, to);
+      return (owners ? q.in("created_by", owners) : q).order("id").range(from, to);
     }),
     fetchAll<{ deal_id: string }>((from, to) => db().from("deal_content").select("deal_id").order("id").range(from, to)),
     fetchAll<{ booking_id: string; recommend: number | null }>((from, to) => db().from("feedback_responses").select("booking_id, recommend").order("id").range(from, to)),
     fetchAll<{ booking_id: string; file_path: string }>((from, to) => db().from("booking_materials").select("booking_id, file_path").eq("kind", "brief").order("id").range(from, to)),
     fetchAll<{ id: string; full_name: string }>((from, to) => db().from("app_users").select("id, full_name").order("id").range(from, to)),
   ]);
-  const title = onlyMine ? "My bookings" : "All bookings";
+  const title = { all: "All bookings", team: "Team bookings", own: "My bookings" }[scope];
   const failed = [days, deals, files, feedback, audio, users].find((r) => r.error);
   if (failed) {
     console.error("[bookings]", failed.error);
@@ -93,7 +98,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
     <div className="space-y-5">
       {params.requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Request sent. It&apos;s on the calendar as “Needs a trainer” and Training Excellence was notified.</p>}
       {params.new && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
-      <PageHeader kicker="Bookings" title={<>{title}</>} lead={<>{onlyMine ? "Every training you requested" : "Every training"}, one row per training. Click a training to see its days, edit it or cancel it.</>} />
+      <PageHeader kicker="Bookings" title={<>{title}</>} lead={<>{{ all: "Every training", team: "Every training you and your team members requested", own: "Every training you requested" }[scope]}, one row per training. Click a training to see its days and details.</>} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
         {tile(null, "All trainings", scoped.length)}

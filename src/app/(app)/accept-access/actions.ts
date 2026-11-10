@@ -8,14 +8,14 @@ import { db } from "@/lib/supabase";
 import { audit } from "@/lib/notify";
 import { applyCategory, inviteProblem, isCategory } from "@/lib/team-access";
 
-type Invite = { id: string; user_id: string; category: string; portal_admin: boolean; permissions: string[]; created_at: string; accepted_at: string | null };
+type Invite = { id: string; user_id: string; category: string; portal_admin: boolean; team_leader: boolean; leader_id: string | null; permissions: string[]; created_at: string; accepted_at: string | null };
 
 // The signed-in person confirms access that an admin offered them by email.
 export async function acceptAccess(fd: FormData) {
   const me = await requireUser();
   const token = String(fd.get("token") ?? "");
   if (!token || token.length > 100) return { error: "This link isn't valid. Ask your admin to send it again." };
-  const { data } = await db().from("access_invites").select("id, user_id, category, portal_admin, permissions, created_at, accepted_at").eq("token", token).maybeSingle();
+  const { data } = await db().from("access_invites").select("id, user_id, category, portal_admin, team_leader, leader_id, permissions, created_at, accepted_at").eq("token", token).maybeSingle();
   const inv = data as Invite | null;
   const problem = inviteProblem(inv, me.id);
   if (problem || !inv) return { error: problem ?? "This link isn't valid." };
@@ -23,16 +23,17 @@ export async function acceptAccess(fd: FormData) {
   // Claim the invite first so a double click can't apply it twice.
   const { data: claimed } = await db().from("access_invites").update({ accepted_at: new Date().toISOString() }).eq("id", inv.id).is("accepted_at", null).select("id");
   if (!claimed?.length) return { error: "This access was already confirmed." };
-  const { data: row } = await db().from("app_users").select("roles, team_admin_of, permissions").eq("id", me.id).maybeSingle();
-  const cur = row as { roles: string[] | null; team_admin_of: string[] | null; permissions: string[] | null } | null;
-  const next = applyCategory({ roles: cur?.roles ?? [], team_admin_of: cur?.team_admin_of ?? [], permissions: cur?.permissions ?? [] }, inv.category, inv.permissions, inv.portal_admin);
+  const { data: row } = await db().from("app_users").select("roles, team_admin_of, team_leader_of, reports_to, permissions").eq("id", me.id).maybeSingle();
+  const cur = row as { roles: string[] | null; team_admin_of: string[] | null; team_leader_of: string[] | null; reports_to: Record<string, string> | null; permissions: string[] | null } | null;
+  const level = inv.portal_admin ? "admin" : inv.team_leader ? "leader" : "member";
+  const next = applyCategory(cur ?? {}, inv.category, inv.permissions, level, inv.leader_id);
   const { error } = await db().from("app_users").update({ role: mainRole(next.roles), ...next }).eq("id", me.id);
   if (error) {
     console.error("[acceptAccess]", error.message);
     await db().from("access_invites").update({ accepted_at: null }).eq("id", inv.id);
     return { error: "Couldn't confirm. Please try again." };
   }
-  await audit(me.id, "access_accepted", null, { category: inv.category, portal_admin: inv.portal_admin });
+  await audit(me.id, "access_accepted", null, { category: inv.category, level, leader: inv.leader_id });
   // Open the app in the new portal straight away.
   (await cookies()).set(VIEW_COOKIE, inv.category, { path: "/", httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
   revalidatePath("/", "layout");
