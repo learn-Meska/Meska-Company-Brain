@@ -140,8 +140,8 @@ export const PROPOSAL_ACCEPT = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.odp,
 export const MAX_PROPOSAL_BYTES = 50 * 1024 * 1024;
 
 export function proposalFileError(fileName: string, size?: number) {
-  if (typeof fileName !== "string" || !PROPOSAL_TYPES.test(fileName.trim())) return "Upload the proposal as a PDF, Word, PowerPoint or Excel file.";
-  if (size != null && (!Number.isFinite(size) || size > MAX_PROPOSAL_BYTES)) return "The proposal must be 50 MB or smaller.";
+  if (typeof fileName !== "string" || !PROPOSAL_TYPES.test(fileName.trim())) return "Upload the training outline as a PDF, Word, PowerPoint or Excel file.";
+  if (size != null && (!Number.isFinite(size) || size > MAX_PROPOSAL_BYTES)) return "The training outline must be 50 MB or smaller.";
   return null;
 }
 
@@ -167,7 +167,7 @@ const daysText = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 export const dealDaysError = (dealDays: number, addedDays: number) =>
   dealDays === addedDays
     ? null
-    : `The number of days chosen (${daysText(addedDays)}) does not match the proposal (${daysText(dealDays)}). ${addedDays < dealDays ? "Add" : "Remove"} ${daysText(Math.abs(dealDays - addedDays))} so they match.`;
+    : `The number of days chosen (${daysText(addedDays)}) does not match the training outline (${daysText(dealDays)}). ${addedDays < dealDays ? "Add" : "Remove"} ${daysText(Math.abs(dealDays - addedDays))} so they match.`;
 
 // value_per_day * days, rounded to the cent (e.g. 100,000 a day for 5 days = 500,000).
 export const dealTotal = (valuePerDay: number, days: number) => Math.round(valuePerDay * days * 100) / 100;
@@ -199,8 +199,8 @@ export const PAST_DATE = "Trainings can't be scheduled on a date that has alread
 
 // Proposals are uploaded under the uploader's own folder, so nobody can attach someone else's file.
 export function proposalPathError(p: ProposalFile | undefined, userId: string) {
-  if (!p || typeof p.path !== "string" || typeof p.name !== "string") return "Upload the proposal.";
-  if (!p.path.startsWith(`${userId}/`) || p.path.includes("..") || p.path.split("/").length !== 2) return "Upload the proposal again.";
+  if (!p || typeof p.path !== "string" || typeof p.name !== "string") return "Upload the training outline.";
+  if (!p.path.startsWith(`${userId}/`) || p.path.includes("..") || p.path.split("/").length !== 2) return "Upload the training outline again.";
   return proposalFileError(p.path) ?? proposalFileError(p.name, Number(p.size));
 }
 

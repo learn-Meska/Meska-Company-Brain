@@ -8,11 +8,11 @@ import { can, requireAccess, requireRole, requireTrainer, requireUser, type Curr
 import { db } from "@/lib/supabase";
 import { esc, siteUrl } from "@/lib/email";
 import { trainingIcs } from "@/lib/ics";
-import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, programVisible, slotsFor, todayISO, trainerTitle } from "@/lib/format";
+import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, slotsFor, todayISO, trainerTitle } from "@/lib/format";
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
 import { checkAudioFile, checkFile, isAudioPath, safeName } from "@/lib/files";
-import { audit, BOOKING_SELECT, bookingRows, notify, trainerRecipient, usersWithRoles, type BookingRow } from "@/lib/notify";
+import { audit, BOOKING_SELECT, bookingRows, notify, stepFor, trainerRecipient, usersWithRoles, type BookingRow } from "@/lib/notify";
 import { trainingTeam } from "@/lib/team";
 import { ENGAGEMENT_LABEL, readDeliveryReport, type DeliveryInput } from "@/lib/delivery";
 import {
@@ -123,7 +123,7 @@ export async function createRequest(input: NewRequest) {
   ]);
   const gone = picked.find((d, i) => !free[i].some((t) => t.id === d.trainer_id));
   if (gone) return { error: `Day ${gone.day_number}: that trainer is no longer available. Pick another or leave it to Training Excellence.` };
-  if (missingFile) return { error: "The proposal didn't finish uploading. Upload it again." };
+  if (missingFile) return { error: "The training outline didn't finish uploading. Upload it again." };
 
   const programName = input.program_name.trim();
   const valuePerDay = Number(input.value_per_day);
@@ -207,7 +207,11 @@ export async function createRequest(input: NewRequest) {
         body: `${me.full_name} requested ${rows.map((b) => `${when(b)}${b.trainers ? ` (${b.trainers.full_name})` : ""}`).join("; ")}${sameNote ? " · same trainer preferred" : ""}`,
         link: `/bookings/${rows[0].id}`,
         email: {
-          subject: open.length ? `Trainer needed: ${input.program_name}` : `New booking: ${input.program_name}`,
+          subject: open.length
+            ? `Action needed: assign a trainer — new deal ${input.company_name.trim()} · ${input.program_name} (${rows.length} ${rows.length === 1 ? "day" : "days"})`
+            : `New deal booked: ${input.company_name.trim()} · ${input.program_name} — trainer asked to confirm`,
+          heading: open.length ? "A new deal needs a trainer" : "A new deal was booked with a trainer",
+          step: open.length ? "requested" : "assigned",
           intro: `<b>${esc(me.full_name)}</b> requested ${rows.length > 1 ? `${rows.length} training days` : "a training"}. ${
             open.length ? `Please assign a trainer${rows.length > open.length ? " for the days without one" : ""}.` : "The chosen trainer was emailed to confirm."
           }${sameNote ? " <b>Same trainer preferred for all days.</b>" : ""}`,
@@ -219,7 +223,12 @@ export async function createRequest(input: NewRequest) {
             ["Industry", esc(rows[0].industry?.name ?? "")],
             ["Participants", String(input.participants.length)],
             ["Deal value", `${fmtAmount(valuePerDay)} per day × ${dealDays} ${dealDays === 1 ? "day" : "days"} = <b>${fmtAmount(total)}</b>`],
-            ["Proposal", esc(input.proposal.name)],
+            ["Training outline", esc(input.proposal.name)],
+          ],
+          next: [
+            ...(open.length ? [`<b>Training Excellence:</b> open the training and assign a trainer to ${open.length === rows.length ? "every day" : `the ${open.length} ${open.length === 1 ? "day" : "days"} without one`}. The trainer is then emailed to confirm.`] : []),
+            ...(rows.length > open.length ? ["The chosen trainer was emailed the assignment and asked to confirm. You'll be notified when they answer."] : []),
+            "The content team was asked to prepare the training content from the training outline and the audience.",
           ],
           button: open.length ? "Assign a trainer" : "View the training",
         },
@@ -227,16 +236,24 @@ export async function createRequest(input: NewRequest) {
       // The content team gets the request too: they read the audience and proposal, then write the content.
       await notify(await usersWithRoles("content"), {
         title: `New content request: ${input.company_name.trim()} — ${input.program_name}`,
-        body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the audience and proposal.`,
+        body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the audience and training outline.`,
         link: `/content/${dealId}`,
         email: {
-          subject: `Content request: ${input.company_name.trim()} — ${input.program_name}`,
-          intro: `<b>${esc(me.full_name)}</b> sent a new deal. Please read the audience and proposal, prepare the content and upload it, then submit it so the trainer can use it.`,
+          subject: `Action needed: prepare content for ${input.company_name.trim()} · ${input.program_name} (first day ${fmtDate(rows[0].date, { day: "numeric", month: "short" })})`,
+          heading: "New content request",
+          step: "requested",
+          intro: `<b>${esc(me.full_name)}</b> from Growth sent a new deal. The training needs content before the trainer delivers it.`,
           rows: [
             ["Company", esc(input.company_name.trim())],
             ["Program", esc(input.program_name)],
             ["Days", String(rows.length)],
             ["Participants", String(input.participants.length)],
+            ["First day", esc(fmtDate(rows[0].date))],
+          ],
+          next: [
+            "Open the request and read the audience (participants) and the training outline.",
+            "Write the content guide and upload the files.",
+            "Submit the content. The assigned trainer and the team are then notified and can use it.",
           ],
           button: "Open the request",
         },
@@ -313,8 +330,11 @@ export async function assignTrainer(assignments: { bookingId: string; trainerId:
     body: rows.map((b) => `Day ${b.day_number}: ${b.trainers?.full_name}`).join(" · "),
     link: `/bookings/${rows[0].id}`,
     email: {
-      subject: `Trainer assigned: ${rows[0].program_name}`,
-      intro: `<b>${esc(me.full_name)}</b> assigned <b>${esc(names)}</b>. The trainer was emailed to confirm.`,
+      subject: `Trainer assigned: ${names} for ${rows[0].program_name} — waiting for confirmation`,
+      heading: `${names} was assigned`,
+      step: "assigned",
+      intro: `<b>${esc(me.full_name)}</b> assigned <b>${esc(names)}</b> to <b>${esc(rows[0].program_name)}</b>.`,
+      next: [`<b>${esc(names)}</b> was emailed the assignment and asked to confirm. You'll be notified when they confirm or decline.`],
       rows: rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${esc(b.trainers?.full_name ?? "")}`] as [string, string]),
       button: "View the training",
     },
@@ -332,10 +352,13 @@ async function emailAssignment(b: BookingRow) {
     body: `${when(b)} · ${b.industry?.name ?? ""}. Please confirm.`,
     link: `/me/bookings/${b.id}`,
     email: {
-      subject: `Training assignment — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
+      subject: `Action needed: confirm your new training — ${trainerTitle(b)} on ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
+      heading: "You have a new training to confirm",
+      step: "assigned",
       intro: `You have been booked to deliver a training for a client in the <b>${esc(b.industry?.name ?? "")}</b> industry on <b>${esc(fmtDate(b.date))}</b>, ${fmtTime(b.start_time)} – ${fmtTime(b.end_time)}. Please review the details below and <b>confirm that you received this assignment</b> within ${hours} hours.`,
       rows: bookingRows(b, true),
       content: b.content || undefined,
+      next: [`Open the training and <b>confirm</b> within ${hours} hours, or decline with a short reason if you can't deliver it.`, "Once you confirm, the team is notified and the training content is shared with you when it's ready."],
       button: "Confirm the assignment",
       extra: `<p style="margin:0 0 16px;font-size:13px;color:#33415C">The calendar invite is attached. Open it to add this training to your calendar.</p>`,
       attachments: [{ filename: "meska-training.ics", content: trainingIcs(b, `${siteUrl()}/me/bookings/${b.id}`), contentType: "text/calendar; charset=utf-8; method=PUBLISH" }],
@@ -376,14 +399,20 @@ export async function respondBooking(id: string, accept: boolean, comment: strin
     link: `/bookings/${id}`,
     email: accept
       ? {
-          subject: `Trainer confirmed: ${title(b)}`,
-          intro: `<b>${esc(me.full_name)}</b> confirmed this training.`,
+          subject: `Confirmed: ${me.full_name} will deliver ${title(b)} on ${fmtDate(b.date, { day: "numeric", month: "short" })}`,
+          heading: "The trainer confirmed",
+          step: "confirmed",
+          intro: `<b>${esc(me.full_name)}</b> confirmed they will deliver this training.`,
+          next: ["The training is scheduled. The trainer will get the content once it's submitted, and the feedback QR code on the day."],
           rows: [...bookingRows({ ...b, status }), ...(comment.trim() ? [["Comment", esc(comment.trim())] as [string, string]] : [])],
           button: "View the training",
         }
       : {
-          subject: `Trainer declined: ${title(b)}`,
-          intro: `<b>${esc(me.full_name)}</b> can't deliver this training. It's back to <b>Needs a trainer</b>; Training Excellence will assign someone else.`,
+          subject: `Action needed: ${me.full_name} declined ${title(b)} — a new trainer is needed`,
+          heading: "The trainer declined",
+          step: "requested",
+          intro: `<b>${esc(me.full_name)}</b> can't deliver this training. It's back to <b>Needs a trainer</b>.`,
+          next: ["<b>Training Excellence:</b> open the training and assign another trainer. The new trainer is then emailed to confirm."],
           rows: [...bookingRows({ ...b, status }), ["Reason", esc(comment.trim())]],
           button: "View the training",
         },
@@ -409,6 +438,77 @@ function mayChange(me: CurrentUser, b: BookingRow, access: "te.edit" | "te.cance
   return can(me, "growth.new_deal") && GROWTH_EDITABLE.includes(b.status) && b.created_by === me.id;
 }
 
+// The week (Monday to Sunday) around a date, for the availability strip on the edit form.
+function weekOf(date: string) {
+  const d = new Date(date + "T00:00:00Z");
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => {
+    const x = new Date(monday);
+    x.setUTCDate(monday.getUTCDate() + i);
+    return x.toISOString().slice(0, 10);
+  });
+}
+
+export type EditTrainerOption = {
+  id: string;
+  full_name: string;
+  title: string | null;
+  tier: { name: string; color: string } | null;
+  score: number;
+  nps: number | null;
+  delivered: number;
+  skills: string[];
+  industries: string[];
+  current: boolean;
+  // free slots that week (this training's own slot counts as free)
+  week: { date: string; morning: boolean; evening: boolean }[];
+};
+
+// Edit training: the trainers free at the new date and time, with their profile summary and their free slots
+// that week, so the person editing can keep the trainer or pick another one.
+export async function editTrainerOptions(bookingId: string, input: { date: string; start: string; end: string }) {
+  const me = await requireRole("admin", "approver", "growth");
+  const [b] = await loadBookings([bookingId]);
+  if (!b || !mayChange(me, b, "te.edit")) return { error: "Booking not found." };
+  if (!DATE.test(input?.date ?? "") || !TIME.test(input?.start ?? "") || !TIME.test(input?.end ?? "") || input.end <= input.start) return { error: "Check the date and time." };
+  if (!slotsFor(input.start, input.end).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
+  if (input.date !== b.date && input.date < todayISO()) return { error: PAST_DATE };
+  // Same rule as a New deal: availability only (the audience is the participant list).
+  const r = await searchTrainers({ date: input.date, start: input.start, end: input.end, audienceId: "", functionId: "", industryId: "", skillIds: [], excludeBookingId: b.id });
+  const ids = r.matches.map((t) => t.id);
+  const days = weekOf(input.date);
+  type Slot = { trainer_id: string; date: string; slot: string; booking_id?: string };
+  let avail: Slot[] = [];
+  let locks: Slot[] = [];
+  if (ids.length) {
+    const [a, l] = await Promise.all([
+      db().from("availability").select("trainer_id, date, slot").in("trainer_id", ids).gte("date", days[0]).lte("date", days[6]),
+      db().from("booking_locks").select("trainer_id, date, slot, booking_id").in("trainer_id", ids).gte("date", days[0]).lte("date", days[6]),
+    ]);
+    avail = (a.data ?? []) as Slot[];
+    locks = (l.data ?? []) as Slot[];
+  }
+  const free = new Set(avail.map((a) => `${a.trainer_id}|${a.date}|${a.slot}`));
+  for (const l of locks) if (l.booking_id !== b.id) free.delete(`${l.trainer_id}|${l.date}|${l.slot}`);
+  const trainers: EditTrainerOption[] = r.matches.map((t) => ({
+    id: t.id,
+    full_name: t.full_name,
+    title: t.title,
+    tier: t.tier ? { name: t.tier.name, color: t.tier.color } : null,
+    score: t.total,
+    nps: t.feedback.npsResponses ? t.feedback.nps : null,
+    delivered: t.delivered,
+    skills: t.skills.map((s) => s.name).slice(0, 4),
+    industries: t.lookups.filter((l) => l.kind === "industry").map((l) => l.name).slice(0, 3),
+    current: t.id === b.trainer_id,
+    week: days.map((date) => ({ date, morning: free.has(`${t.id}|${date}|morning`), evening: free.has(`${t.id}|${date}|evening`) })),
+  }));
+  // the current trainer first, then by score (searchTrainers already sorts by score)
+  trainers.sort((x, y) => Number(y.current) - Number(x.current));
+  return { trainers, currentFree: !b.trainer_id || ids.includes(b.trainer_id), week: days };
+}
+
 export async function editBooking(fd: FormData) {
   const me = await requireRole("admin", "approver", "growth");
   const id = String(fd.get("id"));
@@ -430,6 +530,31 @@ export async function editBooking(fd: FormData) {
   if (!slotsFor(next.start_time, next.end_time).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
   if (next.date !== b.date && next.date < todayISO()) return { error: PAST_DATE };
 
+  // The trainer: "keep" (or nothing sent) keeps the current one, "none" leaves the day for Training Excellence,
+  // an id picks a trainer who must be free at the new date and time.
+  const pick = String(fd.get("trainer_id") ?? "keep");
+  const growthOnly = !can(me, "te.edit");
+  let trainerId: string | null = b.trainer_id;
+  if (pick === "none") {
+    if (growthOnly) return { error: "Choose a trainer for this day." };
+    trainerId = null;
+  } else if (pick !== "keep") {
+    if (!isUuid(pick)) return { error: "Choose the trainer again." };
+    trainerId = pick;
+  }
+  const timeChanged = next.date !== b.date || next.start_time.slice(0, 5) !== b.start_time.slice(0, 5) || next.end_time.slice(0, 5) !== b.end_time.slice(0, 5);
+  const trainerChanged = trainerId !== b.trainer_id;
+  if (trainerId && (trainerChanged || timeChanged)) {
+    const r = await searchTrainers({ date: next.date, start: next.start_time, end: next.end_time, audienceId: "", functionId: "", industryId: "", skillIds: [], excludeBookingId: b.id });
+    if (!r.matches.some((t) => t.id === trainerId))
+      return {
+        error: trainerChanged
+          ? "That trainer isn't free at this date and time any more. Pick another one."
+          : `${b.trainers?.full_name ?? "The trainer"} isn't free at the new date and time. Pick another trainer from the list.`,
+      };
+  }
+  if (growthOnly && !trainerId) return { error: "Choose a trainer for this day." };
+
   const fields: [string, string, string][] = [
     ["Program", b.program_name, next.program_name],
     ["Day", String(b.day_number), String(next.day_number)],
@@ -439,41 +564,116 @@ export async function editBooking(fd: FormData) {
     ["Content", b.content || "—", next.content || "—"],
   ];
   const changes = fields.filter(([, a, c]) => a !== c).map(([field, from, to]) => ({ field, from, to }));
+  let newTrainerName: string | null = null;
+  if (trainerChanged && trainerId) {
+    const { data: t } = await db().from("trainers").select("full_name").eq("id", trainerId).maybeSingle();
+    newTrainerName = (t as { full_name: string } | null)?.full_name ?? "the new trainer";
+  }
+  if (trainerChanged) changes.push({ field: "Trainer", from: b.trainers?.full_name ?? "Not assigned", to: newTrainerName ?? "Not assigned (Training Excellence will assign)" });
   if (!changes.length) return { ok: "Nothing changed." };
 
+  // A new trainer, or a new date or time for a trainer who had confirmed, goes back to the trainer to confirm.
+  const reconfirm = !!trainerId && (trainerChanged || (timeChanged && b.status === "confirmed"));
+  const now = new Date().toISOString();
+  const update = {
+    ...next,
+    ...(trainerChanged ? { trainer_id: trainerId, approver_id: trainerId && !growthOnly ? me.id : null } : {}),
+    ...(trainerChanged || reconfirm
+      ? { status: trainerId ? "awaiting_trainer" : "needs_trainer", decided_at: trainerId ? now : null, reminder_sent_at: null, trainer_comment: null, trainer_responded_at: null }
+      : {}),
+  };
   // Only if nothing changed underneath (e.g. a trainer was assigned while Growth was editing).
-  let q = db().from("bookings").update(next).eq("id", id).eq("status", b.status);
+  let q = db().from("bookings").update(update).eq("id", id).eq("status", b.status);
   q = b.trainer_id ? q.eq("trainer_id", b.trainer_id) : q.is("trainer_id", null);
   const { data: saved, error } = await q.select("id");
   if (error) return { error: friendlyError(error.message) };
   if (!saved?.length) return { error: "This booking changed while you were editing. Refresh the page and try again." };
   await audit(me.id, "booking_edited", id, { changes, program: title(b) });
+  if (trainerChanged) {
+    if (b.trainer_id) await audit(me.id, "trainer_removed", id, { program: title(b), trainer: b.trainers?.full_name });
+    if (trainerId) await audit(me.id, "trainer_assigned", id, { program: title(b), trainer: newTrainerName });
+  }
   const [fresh] = await loadBookings([id]);
   if (!fresh) return { ok: "Saved." };
 
-  const summary = changes.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · ");
-  const email = { subject: `Training updated: ${title(fresh)}`, intro: `<b>${esc(me.full_name)}</b> changed this training. Here's what's different:`, extra: changeTable(changes), rows: bookingRows(fresh) };
-  // The trainer's copy leaves out the program name while it's still hidden from them.
-  const forTrainer = programVisible(fresh) ? changes : changes.filter((c) => c.field !== "Program");
-  if (fresh.trainer_id && forTrainer.length) {
+  // The previous trainer is told they're off it (the invite is withdrawn from their calendar).
+  if (trainerChanged && b.trainer_id) await emailTrainerRemoved(b, me.full_name);
+  // A new trainer gets the full assignment email; the same trainer gets what changed.
+  const trainerChanges = changes.filter((c) => c.field !== "Trainer");
+  if (trainerChanged && fresh.trainer_id) await emailAssignment(fresh);
+  else if (fresh.trainer_id && trainerChanges.length) {
+    const hours = (await getSetting("trainer_response", { hours: 48 })).hours;
+    const day = fmtDate(fresh.date, { weekday: "long", day: "numeric", month: "long" });
     await notify([await trainerRecipient(fresh)], {
-      title: `Training updated: ${trainerTitle(fresh)}`,
-      body: forTrainer.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · "),
+      title: reconfirm ? `New date — please confirm: ${trainerTitle(fresh)}` : `Training updated: ${trainerTitle(fresh)}`,
+      body: trainerChanges.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · "),
       link: `/me/bookings/${id}`,
       email: {
-        subject: `Training updated — ${fmtDate(fresh.date, { weekday: "long", day: "numeric", month: "long" })}`,
-        intro: email.intro,
-        extra: changeTable(forTrainer),
+        subject: reconfirm ? `Action needed: confirm the new date of ${trainerTitle(fresh)} (now ${day})` : `Training details changed: ${trainerTitle(fresh)} on ${day}`,
+        heading: reconfirm ? "The date or time of your training changed" : "Your training details changed",
+        step: stepFor(fresh),
+        intro: `<b>${esc(me.full_name)}</b> changed ${trainerChanges.length === 1 ? "one detail" : `${trainerChanges.length} details`} of this training. The table shows each change, before and now.`,
+        extra: changeTable(trainerChanges),
         rows: bookingRows(fresh, true),
+        next: reconfirm
+          ? [`Open the training and <b>confirm the new date and time</b> within ${hours} hours, or decline if you can no longer deliver it.`, "Open the attached calendar invite to update the event in your calendar."]
+          : ["Nothing else is needed from you. Open the attached calendar invite to update the event in your calendar."],
+        button: reconfirm ? "Confirm the new date" : "View the training",
         // the updated invite replaces the one they already added to their calendar
         attachments: [{ filename: "meska-training.ics", content: trainingIcs(fresh, `${siteUrl()}/me/bookings/${id}`), contentType: "text/calendar; charset=utf-8; method=PUBLISH" }],
       },
     });
   }
-  await notify(await trainingTeam(fresh, me.id), { title: `Training updated: ${title(fresh)}`, body: summary, link: `/bookings/${id}`, email });
+
+  const summary = changes.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · ");
+  const trainerName = esc(fresh.trainers?.full_name ?? "The trainer");
+  const teamNext =
+    trainerChanged && fresh.trainer_id
+      ? [`<b>${esc(newTrainerName ?? "The new trainer")}</b> was emailed the assignment and asked to confirm. You'll be notified when they answer.`]
+      : trainerChanged
+        ? ["Training Excellence needs to assign a new trainer for this day."]
+        : reconfirm
+          ? [`<b>${trainerName}</b> was asked to confirm the new date and time. You'll be notified when they answer.`]
+          : fresh.trainer_id
+            ? [`<b>${trainerName}</b> was told about the change. Nothing else is needed.`]
+            : ["This day still needs a trainer. Training Excellence will assign one."];
+  await notify(await trainingTeam(fresh, me.id), {
+    title: `Training updated: ${title(fresh)}`,
+    body: summary,
+    link: `/bookings/${id}`,
+    email: {
+      subject: `Training updated (${changes.map((c) => c.field.toLowerCase()).join(", ")}): ${title(fresh)}`,
+      heading: trainerChanged ? "The trainer of a training changed" : "A training was changed",
+      step: stepFor(fresh),
+      intro: `<b>${esc(me.full_name)}</b> changed ${changes.length === 1 ? "one detail" : `${changes.length} details`} of <b>${esc(title(fresh))}</b>. The table shows each change, before and now.`,
+      extra: changeTable(changes),
+      rows: bookingRows(fresh),
+      next: teamNext,
+      button: "View the training",
+    },
+  });
   refresh();
   revalidatePath(`/bookings/${id}`);
+  if (trainerChanged && fresh.trainer_id) return { ok: `Saved. ${newTrainerName} was emailed to confirm, and the team was notified.` };
+  if (reconfirm) return { ok: "Saved. The trainer was asked to confirm the new date and time, and the team was notified." };
   return { ok: fresh.trainer_id ? "Saved. The trainer and the team were notified of the changes." : "Saved. The team was notified of the changes." };
+}
+
+// Tells a trainer they are no longer on a training day and withdraws the calendar invite.
+async function emailTrainerRemoved(d: BookingRow, by: string) {
+  await notify([await trainerRecipient(d)], {
+    title: `You are no longer assigned: ${trainerTitle(d)}`,
+    body: when(d),
+    link: "/me/bookings",
+    email: {
+      subject: `You're no longer assigned: ${trainerTitle(d)} on ${fmtDate(d.date, { weekday: "long", day: "numeric", month: "long" })}`,
+      heading: "You've been taken off a training",
+      intro: `<b>${esc(by)}</b> changed the plan of this training, so you are no longer assigned to it. The slot is free again in your calendar.`,
+      rows: bookingRows(d, true),
+      next: ["Nothing is needed from you. Open the attached file to remove the event from your calendar."],
+      attachments: [{ filename: "meska-training-cancelled.ics", content: trainingIcs(d, `${siteUrl()}/me/bookings`, true), contentType: "text/calendar; charset=utf-8; method=CANCEL" }],
+    },
+  });
 }
 
 /* ---------- Client contact (whole request) ---------- */
@@ -497,8 +697,10 @@ export async function updateContact(fd: FormData) {
     body: `${c.name.trim()} · ${c.email.trim()} · ${c.mobile.trim()}`,
     link: `/bookings/${id}`,
     email: {
-      subject: `Client contact updated: ${b.program_name}`,
-      intro: `<b>${esc(me.full_name)}</b> updated the client contact for this training.`,
+      subject: `Client contact changed for ${b.program_name}: now ${c.name.trim()}`,
+      heading: "The client point of contact changed",
+      intro: `<b>${esc(me.full_name)}</b> updated the client contact for ${b.batch_id ? "every day of " : ""}this training. Use the new contact from now on.`,
+      next: ["Nothing else is needed. The trainer doesn't see the client contact."],
       rows: [["Program", esc(b.program_name)], ["Client contact", contactLine]],
       button: "View the training",
     },
@@ -550,8 +752,10 @@ async function cancelDay(me: Canceller, b: BookingRow, reason: string): Promise<
       body: when(b),
       link: `/me/bookings`,
       email: {
-        subject: `Training cancelled — ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        subject: `Cancelled: ${trainerTitle(b)} on ${fmtDate(b.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        heading: "Your training was cancelled",
         intro: "The following training has been cancelled. The slot is free again in your calendar.",
+        next: ["Nothing is needed from you. Open the attached file to remove the event from your calendar."],
         rows: bookingRows({ ...b, status: "cancelled" }, true),
         // opening it removes the event from their calendar
         attachments: [{ filename: "meska-training-cancelled.ics", content: trainingIcs(b, `${siteUrl()}/me/bookings`, true), contentType: "text/calendar; charset=utf-8; method=CANCEL" }],
@@ -574,13 +778,15 @@ async function notifyCancelled(me: Canceller, days: CancelledDay[]) {
     body: `${me.full_name}: ${days[0].reason}`,
     link: `/bookings/${first.id}`,
     email: {
-      subject: `Training cancelled: ${label}`,
+      subject: `${shortNotice ? "Short-notice cancellation" : "Cancelled"}: ${label}${first.trainers ? ` (trainer ${first.trainers.full_name})` : ""}`,
+      heading: shortNotice ? "A training was cancelled at short notice" : "A training was cancelled",
       intro: `<b>${esc(me.full_name)}</b> cancelled ${days.length > 1 ? `${days.length} days of this training` : "this training"}${shortNotice ? " at short notice" : ""}.${hadTrainer ? " The trainer was told." : ""}`,
       rows: [
         ["Program", esc(first.program_name)],
         ...days.map((d) => [`Day ${d.b.day_number}`, `${esc(when(d.b))}${d.b.trainers ? ` · ${esc(d.b.trainers.full_name)}` : ""}`] as [string, string]),
         ["Reason", esc(days[0].reason)],
       ],
+      next: ["Nothing else is needed. The cancelled days stay on record with the reason in the activity log."],
       button: "View the training",
     },
   });
@@ -614,7 +820,14 @@ export async function recordMaterial(bookingId: string, path: string, fileName: 
       title: `New material for ${trainerTitle(b)}`,
       body: fileName,
       link: `/me/bookings/${bookingId}`,
-      email: { subject: `Training material uploaded — ${fmtDate(b.date, { day: "numeric", month: "long" })}`, intro: `New material is ready for your training on <b>${esc(fmtDate(b.date))}</b>: <b>${esc(fileName)}</b>.`, rows: bookingRows(b, true), button: "Download the material" },
+      email: {
+        subject: `New material for ${trainerTitle(b)} on ${fmtDate(b.date, { day: "numeric", month: "long" })}: ${fileName}`,
+        heading: "New material for your training",
+        intro: `New material is ready for your training on <b>${esc(fmtDate(b.date))}</b>: <b>${esc(fileName)}</b>.`,
+        rows: bookingRows(b, true),
+        next: ["Download the material and review it before the training."],
+        button: "Download the material",
+      },
     });
   }
   revalidatePath(`/bookings/${bookingId}`);
@@ -714,8 +927,10 @@ export async function reassignTraining(fd: FormData) {
       body: when(d),
       link: "/me/bookings",
       email: {
-        subject: `Training reassigned — ${fmtDate(d.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        subject: `You're no longer assigned: ${trainerTitle(d)} on ${fmtDate(d.date, { weekday: "long", day: "numeric", month: "long" })}`,
+        heading: "You've been taken off a training",
         intro: "You are no longer assigned to the following training. The slot is free again in your calendar.",
+        next: ["Nothing is needed from you. Open the attached file to remove the event from your calendar."],
         rows: bookingRows(d, true),
         attachments: [{ filename: "meska-training-cancelled.ics", content: trainingIcs(d, `${siteUrl()}/me/bookings`, true), contentType: "text/calendar; charset=utf-8; method=CANCEL" }],
       },
@@ -727,9 +942,12 @@ export async function reassignTraining(fd: FormData) {
       body: `${released.length} ${released.length === 1 ? "day needs" : "days need"} a trainer.`,
       link: `/dashboard/${b.id}`,
       email: {
-        subject: `Trainer removed: ${b.program_name}`,
+        subject: `Action needed: choose a new trainer for ${b.program_name} (${released.length} ${released.length === 1 ? "day" : "days"})`,
+        heading: "The trainer was taken off this training",
+        step: "requested",
         intro: `<b>${esc(me.full_name)}</b> took the trainer off ${released.length === 1 ? "one day" : `${released.length} days`} of this training, so ${released.length === 1 ? "it needs" : "they need"} a new trainer. The previous trainer was told.`,
         rows: [["Program", esc(b.program_name)], ...released.map((d) => [`Day ${d.day_number}`, `${esc(when(d))} · was ${esc(d.trainers?.full_name ?? "")}`] as [string, string])],
+        next: ["<b>Training Excellence:</b> open the training and assign the new trainer. They are then emailed to confirm."],
         button: "View the training",
       },
     });
@@ -856,7 +1074,9 @@ export async function submitBrief(bookingId: string, input: DeliveryInput) {
     body: `${r.me.full_name} · ${report.attended} attended · engagement ${report.engagement}/5`,
     link: `/dashboard/${bookingId}`,
     email: {
-      subject: `${label}: ${title(r.b)}`,
+      subject: `${label}: ${title(r.b)} by ${r.me.full_name} — ${report.attended} attended, engagement ${report.engagement}/5`,
+      heading: first ? "A training day was delivered" : "A delivery report was updated",
+      step: "delivered",
       intro: `<b>${esc(r.me.full_name)}</b> ${first ? "marked this training day as delivered and sent the delivery report" : "updated the delivery report"}.`,
       rows: [
         ...bookingRows(r.b),
@@ -869,6 +1089,7 @@ export async function submitBrief(bookingId: string, input: DeliveryInput) {
         ...(audioCount ? [["Audio", `${audioCount} file${audioCount > 1 ? "s" : ""}`] as [string, string]] : []),
       ],
       content: brief || undefined,
+      next: ["Read the delivery report and listen to the audio. Participant feedback is summarised for the trainer once the form closes."],
       button: "Read the report",
     },
   });

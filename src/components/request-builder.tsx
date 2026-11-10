@@ -125,7 +125,7 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
   function submit() {
     setErr("");
     if (!people?.list.length) return setErr("Upload the participants file (step 2).");
-    if (!proposal) return setErr("Upload the proposal (step 3).");
+    if (!proposal) return setErr("Upload the training outline (step 3).");
     if (daysError) return setErr(daysError);
     start(async () => {
       const r = await createRequest({
@@ -232,11 +232,11 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
       <section className="card space-y-4">
         <div>
           <div className="eyebrow">Step 3</div>
-          <h2 className="h2">Proposal &amp; value</h2>
-          <p className="text-sm text-muted">Upload the proposal sent to the client (PDF, Word, PowerPoint or Excel), then the value per training day and how many days the deal covers.</p>
+          <h2 className="h2">Training outline &amp; value</h2>
+          <p className="text-sm text-muted">Upload the training outline shared with the client (PDF, Word, PowerPoint or Excel), then the value per training day and how many days the deal covers.</p>
         </div>
         <Dropzone
-          title="Choose or drop the proposal"
+          title="Choose or drop the training outline"
           hint=".pdf, .docx, .pptx or .xlsx — 50 MB at most"
           accept={PROPOSAL_ACCEPT}
           busy={proposalMsg.busy}

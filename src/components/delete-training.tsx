@@ -18,7 +18,7 @@ export function DeleteTraining({ id, days, isDeal }: { id: string; days: number;
             <h2 className="text-base font-semibold text-ds-heading">Delete this {isDeal ? "deal" : "training"}</h2>
             <p className="max-w-xl text-sm text-ds-text">
               Removes it from the app for good: {days === 1 ? "the training day" : `all ${days} training days`}
-              {isDeal ? ", participants, proposal, content and files" : " and its files"}, briefs and feedback. Nobody is emailed. This can&apos;t be undone.
+              {isDeal ? ", participants, training outline, content and files" : " and its files"}, briefs and feedback. Nobody is emailed. This can&apos;t be undone.
             </p>
           </div>
         </div>

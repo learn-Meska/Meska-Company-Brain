@@ -6,7 +6,7 @@ import { approvesContent } from "@/lib/team-access";
 import { db } from "@/lib/supabase";
 import { esc } from "@/lib/email";
 import { checkFile, downloadName, safeName } from "@/lib/files";
-import { friendlyError, isUuid } from "@/lib/format";
+import { fmtDate, friendlyError, isUuid } from "@/lib/format";
 import { audit, BOOKING_SELECT, notify, trainerRecipient, userById, usersWithRoles, type BookingRow } from "@/lib/notify";
 import { trainingTeam } from "@/lib/team";
 
@@ -98,13 +98,15 @@ export async function submitContent(dealId: string, guide: string) {
       body: `${me.full_name} sent the content for approval.`,
       link: `/content/${dealId}`,
       email: {
-        subject: `Approve content: ${label}`,
+        subject: `Action needed: approve the content for ${label} (from ${me.full_name})`,
+        heading: "Content is waiting for your approval",
         intro: `<b>${esc(me.full_name)}</b> prepared the content for this training and sent it for your approval. The trainer sees it only after you approve it.`,
         rows: [
           ["Company", esc(d.deal.company_name)],
           ["Program", esc(d.days[0].program_name)],
           ["Files", String(count ?? 0)],
         ],
+        next: ["Open the content and review the guide and files.", "<b>Approve</b> it by submitting, so the trainer and the team are notified, or <b>send it back</b> with a note on what to change."],
         button: "Review the content",
       },
     });
@@ -139,8 +141,11 @@ export async function submitContent(dealId: string, guide: string) {
       body: "Your guide and files are ready on the training.",
       link: `/me/bookings/${b.id}`,
       email: {
-        subject: `${again ? "Updated" : "New"} training content — ${b.program_name}`,
-        intro: `The content team ${again ? "updated" : "prepared"} the content for <b>${esc(b.program_name)}</b>. Open your training to read the guide and download the files.`,
+        subject: `${again ? "Content updated" : "Content ready"} for ${b.program_name} — your training on ${fmtDate(b.date, { day: "numeric", month: "long" })}`,
+        heading: again ? "The training content was updated" : "Your training content is ready",
+        step: "content",
+        intro: `The content team ${again ? "updated" : "prepared"} the content for <b>${esc(b.program_name)}</b>.`,
+        next: [`Open your training to read the guide and download the files${again ? " (the latest version replaces the previous one)" : ""}.`, "Prepare the session with it before the training day."],
         button: "Open the training",
       },
     });
@@ -153,8 +158,11 @@ export async function submitContent(dealId: string, guide: string) {
       body: `${me.full_name} approved your content.`,
       link: `/content/${dealId}`,
       email: {
-        subject: `Content approved: ${label}`,
+        subject: `Approved: your content for ${label}`,
+        heading: "Your content was approved",
+        step: "content",
         intro: `<b>${esc(me.full_name)}</b> approved the content you prepared.${seen}`,
+        next: ["Nothing else is needed. If the training changes, you can update the content and send it again."],
         button: "Open the content",
       },
     });
@@ -164,12 +172,16 @@ export async function submitContent(dealId: string, guide: string) {
     body: `${me.full_name} ${again ? "updated" : "submitted"} the content.`,
     link: `/bookings/${d.days[0].id}`,
     email: {
-      subject: `Content ${again ? "updated" : "submitted"}: ${label}`,
+      subject: `Content ${again ? "updated" : "ready"}: ${label}`,
+      heading: again ? "The training content was updated" : "The training content is ready",
+      step: "content",
       intro: `<b>${esc(me.full_name)}</b> ${requester ? `approved the content from <b>${esc(requester.full_name)}</b>` : again ? "updated the content" : "submitted the content"} for this training.${seen}`,
       rows: [
         ["Company", esc(d.deal.company_name)],
         ["Program", esc(d.days[0].program_name)],
+        ["Files", String(count ?? 0)],
       ],
+      next: [mine.size ? "The assigned trainer was notified and can read the guide and download the files on the training." : "The trainer will see the content as soon as one is assigned and confirms."],
       button: "View the training",
     },
   });
@@ -208,9 +220,11 @@ export async function returnContent(dealId: string, note: string) {
       body: text.slice(0, 140),
       link: `/content/${dealId}`,
       email: {
-        subject: `Changes requested on your content: ${label}`,
-        intro: `<b>${esc(me.full_name)}</b> reviewed the content you sent and asked for changes before it goes to the trainer.`,
-        content: esc(text).replace(/\n/g, "<br>"),
+        subject: `Action needed: changes requested on your content for ${label}`,
+        heading: "Your content needs changes",
+        intro: `<b>${esc(me.full_name)}</b> reviewed the content you sent and asked for changes before it goes to the trainer. Their note is below.`,
+        content: text,
+        next: ["Open the content, make the changes in the guide or the files, then send it for approval again."],
         button: "Open the content",
       },
     });

@@ -22,7 +22,7 @@ export const ACCESS: Record<Team, AccessDef[]> = {
     { key: "te.trainers", label: "Manage trainer profiles", hint: "Create and edit profiles, scores, photo/CV, invite trainers" },
     { key: "te.compensation", label: "Compensation", hint: "Add, edit and delete compensation lines" },
     { key: "te.settings", label: "Scoring & lists", hint: "Skills, industries, tiers, score categories, rules" },
-    { key: "te.deal_value", label: "See deal value", hint: "Deal value and proposal on the deal card" },
+    { key: "te.deal_value", label: "See deal value", hint: "Deal value and training outline on the deal card" },
     { key: "te.emails", label: "Get emails", hint: "New deal and training change emails" },
   ],
   growth: [
@@ -30,11 +30,11 @@ export const ACCESS: Record<Team, AccessDef[]> = {
     { key: "growth.all_bookings", label: "See all bookings", hint: "Every deal and booking, not only their own" },
     { key: "growth.trainers", label: "Browse trainers", hint: "View trainer profiles and download PDFs" },
     { key: "growth.calendar", label: "Calendar", hint: "See the training calendar" },
-    { key: "growth.deal_value", label: "See deal value", hint: "Value and proposal on deals" },
+    { key: "growth.deal_value", label: "See deal value", hint: "Value and training outline on deals" },
     { key: "growth.emails", label: "Get emails", hint: "Emails about trainings they're on" },
   ],
   content: [
-    { key: "content.view", label: "View content requests", hint: "See deals, audience, proposal and training days" },
+    { key: "content.view", label: "View content requests", hint: "See deals, audience, training outline and training days" },
     { key: "content.write", label: "Write content", hint: "Write the guide and upload or delete files" },
     { key: "content.submit", label: "Submit content", hint: "Send the content to trainers; members need a content admin's approval first" },
     { key: "content.emails", label: "Get emails", hint: "New deal and content emails" },

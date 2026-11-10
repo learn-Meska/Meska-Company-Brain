@@ -90,13 +90,40 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 export type EmailRow = [label: string, value: string];
 
+// The steps of a training, shown as a tracker at the top of every training email so the reader sees where it stands.
+export const TRAINING_STEPS = [
+  ["requested", "Requested"],
+  ["assigned", "Trainer assigned"],
+  ["confirmed", "Trainer confirmed"],
+  ["content", "Content ready"],
+  ["delivered", "Delivered"],
+] as const;
+export type TrainingStep = (typeof TRAINING_STEPS)[number][0];
+
+function stepTracker(step: TrainingStep) {
+  const at = TRAINING_STEPS.findIndex(([k]) => k === step);
+  const cells = TRAINING_STEPS.map(([, label], i) => {
+    const done = i < at;
+    const now = i === at;
+    const dot = now ? "background:#2563EB;color:#fff" : done ? "background:#DCFCE7;color:#0E7C55" : "background:#EEF2F8;color:#97A3B8";
+    return `<td align="center" style="padding:0 2px;vertical-align:top;width:20%"><div style="display:inline-block;width:24px;height:24px;line-height:24px;border-radius:999px;font-size:12px;font-weight:700;${dot}">${done ? "&#10003;" : i + 1}</div><div style="margin-top:4px;font-size:10.5px;line-height:1.3;${now ? "color:#1D4ED8;font-weight:700" : done ? "color:#0E7C55" : "color:#97A3B8"}">${label}</div></td>`;
+  }).join("");
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#F8FAFE;border:1px solid #E1E7F1;border-radius:10px;padding:10px 4px"><tr>${cells}</tr></table>`;
+}
+
 // One branded layout for every message the system sends.
 export function emailLayout(opts: {
   greeting: string;
+  // a one-line headline of what happened, above the intro
+  heading?: string;
+  // where the training stands now, shown as a step tracker
+  step?: TrainingStep;
   intro: string;
   rows?: EmailRow[];
   content?: string;
   extra?: string;
+  // what happens next / what the reader needs to do (HTML allowed; callers escape their data)
+  next?: string[];
   button?: { label: string; url: string };
   footnote?: string;
 }) {
@@ -114,11 +141,14 @@ export function emailLayout(opts: {
 <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#93C5FD;font-weight:500">Programs, Learning &amp; Delivery</div>
 <div style="font-size:20px;font-weight:700;margin-top:4px">Meska Company Brain</div></td></tr>
 <tr><td style="padding:26px 28px">
+${opts.step ? stepTracker(opts.step) : ""}
+${opts.heading ? `<div style="margin:0 0 10px;font-size:18px;font-weight:700;color:#0B1E3A;line-height:1.35">${esc(opts.heading)}</div>` : ""}
 <p style="margin:0 0 12px;font-size:15px">${esc(opts.greeting)}</p>
 <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#33415C">${opts.intro}</p>
 ${rows ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E1E7F1;border-radius:10px;border-collapse:separate;margin-bottom:18px">${rows}</table>` : ""}
 ${opts.content ? `<div style="background:linear-gradient(120deg,#EFF6FF,#DBEAFE);border-left:4px solid #2563EB;border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:18px"><div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#2563EB;font-weight:600;margin-bottom:6px">Content to be delivered</div><div style="font-size:14px;line-height:1.65;white-space:pre-wrap">${esc(opts.content)}</div></div>` : ""}
 ${opts.extra ?? ""}
+${opts.next?.length ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:12px 16px;margin-bottom:18px"><div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#92400E;font-weight:700;margin-bottom:6px">What happens next</div><ul style="margin:0;padding-left:18px;font-size:13.5px;line-height:1.6;color:#33415C">${opts.next.map((n) => `<li style="margin:2px 0">${n}</li>`).join("")}</ul></div>` : ""}
 ${opts.button ? `<p style="margin:6px 0 18px"><a href="${opts.button.url}" style="display:inline-block;background:#2563EB;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px">${esc(opts.button.label)}</a></p>` : ""}
 ${opts.footnote ? `<p style="margin:0;font-size:12.5px;color:#5E6B82;line-height:1.6">${opts.footnote}</p>` : ""}
 </td></tr>
