@@ -14,13 +14,14 @@ import { deleteTrainer, inviteTrainer, saveTrainerScores, updateTrainer } from "
 export default async function EditTrainerPage({ params, searchParams }: PageProps<"/trainers/[id]/edit">) {
   const me = await requireTrainerManager();
   const { id } = await params;
-  const { created, uploadError } = await searchParams;
+  const { created, uploadError, invite, inviteFailed } = await searchParams;
   const [t] = await getTrainerProfiles([id]);
   if (!t) notFound();
   return (
     <div className="space-y-5">
       <Link href={`/trainers/${id}`} className="text-sm text-blue hover:underline">← View profile</Link>
-      {created && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Profile created. Add scores below, then send the invitation.</p>}
+      {created && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Profile created. Add scores below.</p>}
+      {created && typeof invite === "string" && <p className={`rounded-xl px-4 py-3 text-sm ${inviteFailed ? "bg-bad-bg text-bad" : "bg-good-bg text-good"}`}>{invite}</p>}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="h1">{t.full_name}</h1>

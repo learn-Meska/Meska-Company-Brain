@@ -43,7 +43,8 @@ export function TrainerCreateForm({ children }: { children: ReactNode }) {
       const u = await uploadTrainerFile(r.id as string, k, f);
       if (u.error) problems.push(`${k === "photo" ? "Photo" : "CV"}: ${u.error}`);
     }
-    startTransition(() => router.push(`/trainers/${r.id}/edit?created=1${problems.length ? `&uploadError=${encodeURIComponent(problems.join(" "))}` : ""}`));
+    const invite = `&invite=${encodeURIComponent(r.inviteNote)}${r.inviteFailed ? "&inviteFailed=1" : ""}`;
+    startTransition(() => router.push(`/trainers/${r.id}/edit?created=1${invite}${problems.length ? `&uploadError=${encodeURIComponent(problems.join(" "))}` : ""}`));
   }
   return (
     <form onSubmit={onSubmit} className="card space-y-5">

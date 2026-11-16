@@ -170,7 +170,7 @@ export async function saveRules(fd: FormData) {
 // For a login that already has a password (e.g. an admin who is also a trainer): no set-password
 // link, which would only ask them to replace the password they already use.
 async function sendTrainerAccess(email: string, name: string) {
-  await sendEmail(
+  return sendEmail(
     email,
     "Your trainer profile is ready in Meska Company Brain",
     emailLayout({
@@ -433,8 +433,17 @@ export async function createTrainer(fd: FormData) {
   const id = (data as { id: string }).id;
   const tagError = await saveTrainerTags(id, fd);
   await audit(me.id, "trainer_created", null, { id, name: row.full_name });
-  // the create form uploads the photo and CV next, then opens the edit page
-  return { ok: (tagError ? "Profile created, but the skills couldn't be saved. Add them on the edit page." : "Profile created.") + pdfNote(row), id };
+  // A new trainer always hears from us: the invitation (set-your-password link, or sign-in note for an
+  // existing login) goes out as soon as the profile exists. Never leave a new trainer without an email.
+  const invited = row.email ? await inviteTrainerById(me, id) : null;
+  const inviteFailed = !invited || "error" in invited;
+  const inviteNote = !invited
+    ? "No email on the profile, so no invitation was sent. Add their email and save to send it."
+    : "error" in invited
+      ? `The invitation email failed: ${invited.error} Use “Send invitation” below.`
+      : invited.ok;
+  // the create form uploads the photo and CV next, then opens the edit page (which shows inviteNote)
+  return { ok: (tagError ? "Profile created, but the skills couldn't be saved. Add them on the edit page." : "Profile created.") + pdfNote(row), id, inviteNote, inviteFailed };
 }
 
 export async function updateTrainer(fd: FormData) {
@@ -462,8 +471,14 @@ export async function updateTrainer(fd: FormData) {
   const tagError = await saveTrainerTags(id, fd);
   // keep the login profile's name/email in step
   if (uid) await db().from("app_users").update({ full_name: row.full_name, ...(emailChanged && row.email ? { email: row.email } : {}) }).eq("id", uid);
+  // A trainer who gets an email (or a new one) before they have a login is invited right away.
+  let inviteNote = "";
+  if (!uid && emailChanged && row.email) {
+    const invited = await inviteTrainerById(me, id);
+    inviteNote = "error" in invited ? ` But the invitation email failed: ${invited.error}` : ` ${invited.ok}`;
+  }
   revalidatePath(`/trainers/${id}`);
-  return tagError ?? { ok: "Profile saved." + pdfNote(row) };
+  return tagError ?? { ok: "Profile saved." + inviteNote + pdfNote(row) };
 }
 
 export async function saveTrainerScores(fd: FormData) {
@@ -505,6 +520,11 @@ export async function inviteTrainer(fd: FormData) {
   const me = await requireTrainerManager();
   const id = str(fd, "id");
   if (!isUuid(id)) return { error: "Trainer not found." };
+  return inviteTrainerById(me, id);
+}
+
+// Not exported: callers check requireTrainerManager() first. Creates or links the login and emails the trainer.
+async function inviteTrainerById(me: { id: string; role: string }, id: string): Promise<{ ok: string } | { error: string }> {
   const { data } = await db().from("trainers").select("*").eq("id", id).maybeSingle();
   const t = data as { id: string; full_name: string; email: string | null; user_id: string | null } | null;
   if (!t) return { error: "Trainer not found." };
@@ -545,12 +565,12 @@ export async function inviteTrainer(fd: FormData) {
     const { data: authUser } = await db().auth.admin.getUserById(uid);
     const hasLogin = !created?.isNew && (!!authUser?.user?.last_sign_in_at || ((existing as { roles: string[] | null } | null)?.roles ?? []).some((r) => (STAFF_ROLES as readonly string[]).includes(r)));
     if (hasLogin) {
-      await sendTrainerAccess(t.email, t.full_name);
+      if (!(await sendTrainerAccess(t.email, t.full_name))) return { error: `Gmail refused the email to ${t.email}. Check the address and try again.` };
       await audit(me.id, "trainer_invited", null, { id, email: t.email, existing_login: true });
       revalidatePath(`/trainers/${id}`);
       return { ok: `${t.email} already has a login, so no new password is needed. They were emailed to sign in as usual and switch to Trainer view.` };
     }
-    await sendInvite(t.email, t.full_name, "a Meska trainer");
+    if (!(await sendInvite(t.email, t.full_name, "a Meska trainer"))) return { error: `Gmail refused the email to ${t.email}. Check the address and try again.` };
     await audit(me.id, "trainer_invited", null, { id, email: t.email });
   } catch (e) {
     console.error("[inviteTrainer]", e instanceof Error ? e.message : e);
