@@ -21,6 +21,17 @@ export async function setFeedbackAlwaysOpen(on: boolean) {
   return { ok: on ? "The QR code and form now work any time." : "The QR code and form now work only on the training day." };
 }
 
+// Test switch: trainers can mark a confirmed day as delivered before its session starts.
+export async function setDeliveryAnyTime(on: boolean) {
+  const me = await requireSettingsEditor();
+  const { error } = await db().from("settings").upsert({ key: "delivery_test", value: { any_time: on === true } });
+  if (error) return { error: "Couldn't save. Please try again." };
+  await audit(me.id, "feedback_settings_changed", null, { delivery_any_time: on === true });
+  revalidatePath("/admin/feedback-form");
+  revalidatePath("/me", "layout");
+  return { ok: on ? "Trainers can now mark a confirmed day as delivered at any time." : "Trainers can now mark a day as delivered only once its session starts." };
+}
+
 // Publishes the participant form. Every QR code opens the live form, so it changes everywhere at once.
 export async function saveFeedbackForm(raw: unknown) {
   const me = await requireSettingsEditor();

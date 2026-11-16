@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, type ReactNode } from "react";
-import { resetFeedbackForm, saveFeedbackForm, setFeedbackAlwaysOpen } from "@/app/(app)/admin/feedback-form/actions";
+import { resetFeedbackForm, saveFeedbackForm, setDeliveryAnyTime, setFeedbackAlwaysOpen } from "@/app/(app)/admin/feedback-form/actions";
 import { QuestionField } from "@/components/feedback-form";
 import { AwardIcon, CheckIcon, LayersIcon, PenIcon, PlusIcon, TrashIcon, TrendIcon } from "@/components/icons";
 import { MAX_QUESTIONS, QTYPE_LABEL, type Question, type QType } from "@/lib/feedback-form";
@@ -68,6 +68,38 @@ export function AlwaysOpenSwitch({ initial }: { initial: boolean }) {
         {m && <div className="mt-2"><Note m={m} /></div>}
       </div>
       <Switch on={on} disabled={pending} onClick={flip} label="QR code works any time" />
+    </section>
+  );
+}
+
+// Test switch: "Mark as delivered" opens at any time for a confirmed day, not only once the session starts.
+export function DeliveryAnyTimeSwitch({ initial }: { initial: boolean }) {
+  const [on, setOn] = useState(initial);
+  const [m, setM] = useState<Msg>(null);
+  const [pending, start] = useTransition();
+  const flip = () =>
+    start(async () => {
+      const next = !on;
+      const r = await setDeliveryAnyTime(next).catch(() => OFFLINE);
+      setM(r);
+      if (!r.error) setOn(next);
+    });
+  return (
+    <section className="ds-card flex flex-wrap items-center gap-4 p-5">
+      <span className={on ? "ds-icon-solid" : "ds-icon-soft"}>
+        <CheckIcon size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-sm font-semibold text-ds-heading">Mark as delivered any time (testing)</h2>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${on ? "bg-ds-primary-soft text-ds-primary" : "bg-ds-subtle text-ds-text"}`}>{on ? "On" : "Off"}</span>
+        </div>
+        <p className="text-sm text-ds-text">
+          {on ? "Trainers can mark any confirmed day as delivered now, before the session starts. Turn it off after testing." : "Trainers can mark a day as delivered once its session starts."}
+        </p>
+        {m && <div className="mt-2"><Note m={m} /></div>}
+      </div>
+      <Switch on={on} disabled={pending} onClick={flip} label="Mark as delivered any time" />
     </section>
   );
 }

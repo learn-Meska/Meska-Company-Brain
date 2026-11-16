@@ -4,6 +4,7 @@ import { requireTrainer } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { getTrainerProfiles } from "@/lib/scoring";
 import { deliveryState } from "@/lib/delivery";
+import { deliveryAnyTime } from "@/lib/feedback-mode";
 import { fmtDate, fmtTime, todayISO, trainerTitle } from "@/lib/format";
 
 export default async function MePage() {
@@ -11,15 +12,16 @@ export default async function MePage() {
   if (!me.trainer_id) return <p className="card">Your login isn&apos;t linked to a trainer profile yet. Please contact the admin.</p>;
   // What needs the trainer: assignments to confirm (also ones whose date already passed), and confirmed days
   // whose session has started but that aren't marked as delivered yet.
+  const anyTime = await deliveryAnyTime();
   const [[t], { data: waiting }, { data: started }] = await Promise.all([
     getTrainerProfiles([me.trainer_id]),
     db().from("bookings").select("id, program_name, day_number, date, start_time, end_time").eq("trainer_id", me.trainer_id).eq("status", "awaiting_trainer").order("date"),
-    db().from("bookings").select("id, program_name, day_number, date, start_time, end_time, status, finished_at").eq("trainer_id", me.trainer_id).eq("status", "confirmed").is("finished_at", null).lte("date", todayISO()).order("date"),
+    db().from("bookings").select("id, program_name, day_number, date, start_time, end_time, status, finished_at").eq("trainer_id", me.trainer_id).eq("status", "confirmed").is("finished_at", null).lte("date", anyTime ? "9999-12-31" : todayISO()).order("date"),
   ]);
   if (!t) return <p className="card">Your trainer profile couldn&apos;t be loaded. Please refresh the page, or contact the admin if it keeps happening.</p>;
   type Day = { id: string; program_name: string; day_number: number; date: string; start_time: string; end_time: string };
   const pending = (waiting ?? []) as Day[];
-  const toDeliver = ((started ?? []) as (Day & { status: string; finished_at: string | null })[]).filter((d) => deliveryState(d) === "ready");
+  const toDeliver = ((started ?? []) as (Day & { status: string; finished_at: string | null })[]).filter((d) => deliveryState(d, undefined, anyTime) === "ready");
   return (
     <div className="space-y-5">
       {toDeliver.length > 0 && (
