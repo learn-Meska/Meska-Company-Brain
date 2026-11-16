@@ -14,6 +14,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (has("te.compensation")) items.push({ href: "/compensation", label: "Compensation" });
     // Training Excellence and admins follow every training on the dashboard; Growth sends deals and has its own list.
     if (u.role === "growth" && has("growth.new_deal")) items.push({ href: "/request", label: "New deal" });
+    // Growth checks dates before a deal exists: it sees whether a trainer is available, never who.
+    if (u.role === "growth") items.push({ href: "/availability", label: "Check availability" });
     if (u.role === "approver" && has("te.assign") && !has("te.dashboard")) items.push({ href: "/request", label: "Request a training" });
     if (has("te.find")) items.push({ href: "/find", label: "Find a trainer" });
     if (has("te.find") || has("te.dashboard") || has("growth.calendar")) items.push({ href: "/calendar", label: "Calendar" });

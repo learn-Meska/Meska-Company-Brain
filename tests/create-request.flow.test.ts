@@ -1,5 +1,6 @@
 // Golden test for the main flow: Growth sends a New deal → the deal, its participants and one booking per day
-// are saved, the trainer is emailed, the booking team is notified, and nothing is left behind when a step fails.
+// are saved without a trainer, Training Excellence is asked to assign one, the content team is told, and nothing
+// is left behind when a step fails. Growth never picks the trainer and never sees who is free.
 // The exact database writes are compared with tests/golden/*.json. Update them only for an intended change
 // (`npm run test:update`), and review the diff.
 
@@ -60,6 +61,7 @@ vi.mock("@/lib/notify", async (importOriginal) => {
 
 const actions = await import("@/app/(app)/bookings/actions");
 const { createProposalUpload, requestTrainerOptions, proposalLink } = actions;
+const { checkAvailability } = await import("@/app/(app)/availability/actions");
 // Waits for the work scheduled with after(), as if the response had gone out.
 const createRequest: typeof actions.createRequest = async (input) => {
   const r = await actions.createRequest(input);
@@ -90,11 +92,11 @@ async function uploadedRequest(over = {}) {
 }
 
 describe("New deal: happy path", () => {
-  it("Growth: saves deal → participants → bookings (golden writes) and notifies", async () => {
+  it("Growth: saves deal → participants → bookings without a trainer (golden writes) and asks Training Excellence", async () => {
     const input = await uploadedRequest({
       days: [
-        { day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: " Cairo ", trainer_id: TRAINER },
-        { day_number: 2, date: "2026-11-11", start: "18:00", end: "22:00", location: "", trainer_id: TRAINER },
+        { day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00", location: " Cairo " },
+        { day_number: 2, date: "2026-11-11", start: "18:00", end: "22:00", location: "" },
       ],
       deal_days: 2,
       same_trainer: true,
@@ -108,23 +110,18 @@ describe("New deal: happy path", () => {
     const bookings = h.fake.tables.bookings;
     expect(new Set(bookings.map((b) => b.deal_id))).toEqual(new Set([fakeId(1)]));
     expect(bookings.every((b) => b.industry_id === INDUSTRY && b.audience_id === null && b.function_id === null)).toBe(true);
-    expect(bookings.map((b) => b.status)).toEqual(["awaiting_trainer", "awaiting_trainer"]);
+    // Growth doesn't pick a trainer: every day waits for Training Excellence
+    expect(bookings.map((b) => [b.status, b.trainer_id, b.decided_at])).toEqual([["needs_trainer", null, null], ["needs_trainer", null, null]]);
     // no per-day content is asked for any more; the NOT NULL column gets ""
     expect(bookings.map((b) => b.content)).toEqual(["", ""]);
 
-    // trainer emailed once per day, booking team once; the trainer copy never carries deal or contact details
-    expect(h.notified.map((n) => n.title)).toEqual([
-      expect.stringMatching(/^New training assigned/),
-      expect.stringMatching(/^New training assigned/),
-      "New booking: Aman Holding HR — trainer emailed",
-      "New content request: Aman Holding — Aman Holding HR",
-    ]);
+    // no trainer is emailed; Training Excellence is asked to assign one, and the content team is told
+    expect(h.notified.map((n) => n.title)).toEqual(["Trainer needed: Aman Holding HR (2 of 2 days)", "New content request: Aman Holding — Aman Holding HR"]);
+    expect(h.notified[0].email!.subject).toMatch(/^Action needed: assign a trainer/);
     // the content team gets the company, program, headcount and first day (the deadline), never the deal value or proposal
-    expect(h.notified[3].to).toEqual(["content@meska.ai"]);
-    expect(Object.fromEntries(h.notified[3].email!.rows!)).toEqual({ Company: "Aman Holding", Program: "Aman Holding HR", Days: "2", Participants: "2", "First day": "Tuesday, 10 November 2026" });
-    const trainerRows = h.notified[0].email!.rows!.map(([k]) => k);
-    expect(trainerRows).toEqual(["Program", "Date", "Time", "Location", "Industry", "Status"]);
-    const teamRows = Object.fromEntries(h.notified[2].email!.rows!);
+    expect(h.notified[1].to).toEqual(["content@meska.ai"]);
+    expect(Object.fromEntries(h.notified[1].email!.rows!)).toEqual({ Company: "Aman Holding", Program: "Aman Holding HR", Days: "2", Participants: "2", "First day": "Tuesday, 10 November 2026" });
+    const teamRows = Object.fromEntries(h.notified[0].email!.rows!);
     expect(teamRows["Participants"]).toBe("2");
     expect(teamRows["Deal value"]).toBe("100,000 per day × 2 days = <b>200,000</b>");
     expect(teamRows["Training outline"]).toBe("Proposal.pdf");
@@ -132,9 +129,27 @@ describe("New deal: happy path", () => {
     expect(h.audits[0].details).toMatchObject({ deal: fakeId(1), value_per_day: 100000, days: 2, participants: 2 });
   });
 
+  it("Growth: the audience is optional (no participant rows, and the emails say so)", async () => {
+    const r = await createRequest(await uploadedRequest({ participants: [] }));
+    expect(r.error).toBeUndefined();
+    expect(h.fake.writes.map((w) => w.table)).toEqual(["deals", "bookings"]);
+    expect(Object.fromEntries(h.notified[0].email!.rows!)["Participants"]).toBe("Not provided yet");
+    expect(Object.fromEntries(h.notified[1].email!.rows!)["Participants"]).toBe("Not provided yet");
+    expect(h.audits[0].details).toMatchObject({ participants: 0 });
+  });
+
+  it("booking manager: a picked trainer is emailed to confirm; the trainer copy never carries deal or contact details", async () => {
+    h.me = { id: USER, role: "approver", full_name: "Manager" };
+    const r = await createRequest(await uploadedRequest({ days: [{ ...validRequest().days[0], trainer_id: TRAINER }] }));
+    expect(r.error).toBeUndefined();
+    expect(h.fake.tables.bookings[0]).toMatchObject({ status: "awaiting_trainer", trainer_id: TRAINER, decided_at: expect.any(String) });
+    expect(h.notified.map((n) => n.title)).toEqual([expect.stringMatching(/^New training assigned/), "New booking: Aman Holding HR — trainer emailed", "New content request: Aman Holding — Aman Holding HR"]);
+    expect(h.notified[0].email!.rows!.map(([k]) => k)).toEqual(["Program", "Date", "Time", "Location", "Industry", "Status"]);
+  });
+
   it("booking manager: a day without a trainer goes on the calendar as needs_trainer", async () => {
     h.me = { id: USER, role: "approver", full_name: "Manager" };
-    const r = await createRequest(await uploadedRequest({ days: [{ ...validRequest().days[0], trainer_id: undefined }] }));
+    const r = await createRequest(await uploadedRequest());
     expect(r.error).toBeUndefined();
     expect(h.fake.tables.bookings[0]).toMatchObject({ status: "needs_trainer", trainer_id: null, decided_at: null, deal_id: fakeId(1) });
     expect(h.notified.map((n) => n.title)).toEqual(["Trainer needed: Aman Holding HR", "New content request: Aman Holding — Aman Holding HR"]);
@@ -155,9 +170,16 @@ describe("New deal: refusals leave nothing behind", () => {
   });
 
   it("invalid input is refused before any write", async () => {
-    const r = await createRequest(await uploadedRequest({ participants: [] }));
+    const r = await createRequest(await uploadedRequest({ participants: "x" as never }));
     expect(r.error).toMatch(/participants file/);
     expect(h.fake.writes).toEqual([]);
+  });
+
+  it("Growth can't choose the trainer, even by calling the action directly", async () => {
+    const r = await createRequest(await uploadedRequest({ days: [{ ...validRequest().days[0], trainer_id: TRAINER }] }));
+    expect(r.error).toBe("Training Excellence assigns the trainer. Send Day 1 without one.");
+    expect(h.fake.writes).toEqual([]);
+    expect(h.notified).toEqual([]);
   });
 
   it("a proposal that never reached storage is refused", async () => {
@@ -166,9 +188,10 @@ describe("New deal: refusals leave nothing behind", () => {
     expect(h.fake.writes).toEqual([]);
   });
 
-  it("a trainer who is no longer free is refused", async () => {
+  it("booking manager: a picked trainer who is no longer free is refused", async () => {
+    h.me = { id: USER, role: "approver", full_name: "Manager" };
     h.free = [{ id: OTHER_TRAINER, full_name: "Someone else", title: null }];
-    const r = await createRequest(await uploadedRequest());
+    const r = await createRequest(await uploadedRequest({ days: [{ ...validRequest().days[0], trainer_id: TRAINER }] }));
     expect(r.error).toMatch(/no longer available/);
     expect(h.fake.writes).toEqual([]);
   });
@@ -182,8 +205,9 @@ describe("New deal: refusals leave nothing behind", () => {
   });
 
   it("if the bookings are refused (slot already booked), the deal and participants are removed again", async () => {
+    h.me = { id: USER, role: "approver", full_name: "Manager" };
     h.fake.failNextInsert("bookings", "slot_already_booked");
-    const r = await createRequest(await uploadedRequest());
+    const r = await createRequest(await uploadedRequest({ days: [{ ...validRequest().days[0], trainer_id: TRAINER }] }));
     expect(r.error).toBe("This trainer is already booked in that slot.");
     expect(h.fake.tables.deals).toEqual([]);
     expect(h.fake.tables.deal_participants).toEqual([]);
@@ -193,7 +217,26 @@ describe("New deal: refusals leave nothing behind", () => {
 });
 
 describe("New deal: helpers around the form", () => {
-  it("trainer options only need the day and time (availability is the only filter)", async () => {
+  it("Growth only learns whether a trainer is available, never who", async () => {
+    const days = [
+      { date: "2026-11-10", start: "10:00", end: "15:00" },
+      { date: "2026-11-11", start: "10:00", end: "15:00" },
+    ];
+    const yes = await checkAvailability({ industry_id: INDUSTRY, days });
+    expect(yes).toEqual({ days: [true, true], sameTrainer: true });
+    expect(JSON.stringify(yes)).not.toMatch(/Trainer One|AI coach|3333/);
+    h.free = [];
+    expect(await checkAvailability({ days: days.slice(0, 1) })).toEqual({ days: [false], sameTrainer: null });
+    expect(await checkAvailability({ days: [] })).toEqual({ error: "Add at least one day." });
+    expect(await checkAvailability({ days: [{ date: "2026-10-01", start: "10:00", end: "15:00" }] })).toEqual({ error: expect.stringMatching(/already passed/) });
+    // the names stay with the booking team
+    await expect(requestTrainerOptions({ days: [{ day_number: 1, ...days[0] }] })).rejects.toThrow(/REDIRECT/);
+    h.me = { id: "t", role: "trainer", full_name: "T" };
+    await expect(checkAvailability({ days })).rejects.toThrow(/REDIRECT/);
+  });
+
+  it("booking team: trainer options only need the day and time", async () => {
+    h.me = { id: USER, role: "approver", full_name: "Manager" };
     expect(await requestTrainerOptions({ days: [] })).toEqual({ days: [] });
     expect(await requestTrainerOptions({ days: [{ day_number: 1, date: "2026-11-10", start: "10:00", end: "15:00" }] })).toEqual({
       days: [[{ id: TRAINER, full_name: "Trainer One", title: "AI coach" }]],

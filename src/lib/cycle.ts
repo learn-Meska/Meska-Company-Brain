@@ -2,6 +2,7 @@
 // No database here and `today` is an argument, so every rule can be tested with plain data.
 
 import { ACTIVE_STATUSES } from "@/lib/format";
+import { isChangeKind, stillApplies, type ChangeKind } from "@/lib/change-request";
 import { nps } from "@/lib/survey";
 
 export type CycleDay = {
@@ -69,6 +70,8 @@ export type Training = {
   score: number | null;
   stage: Stage;
   confirmation: string;
+  // what Growth asked Training Excellence to change, while that request is still waiting
+  changeRequest: ChangeKind | null;
   attention: boolean;
 };
 
@@ -139,8 +142,11 @@ export function buildTrainings(input: {
   audioBookingIds: string[];
   names: Map<string, string>;
   today: string;
+  // open change requests, by the day they were raised from
+  changeRequests?: { booking_id: string; kind: string }[];
 }): Training[] {
   const { days, deals, contentFileDealIds, feedback, audioBookingIds, names, today } = input;
+  const requests = input.changeRequests ?? [];
   const dealById = new Map(deals.map((d) => [d.id, d]));
   const withFiles = new Set(contentFileDealIds);
   const withAudio = new Set(audioBookingIds);
@@ -166,6 +172,9 @@ export function buildTrainings(input: {
     const allDates = sorted.map((d) => d.date).sort();
     const ids = new Set(sorted.map((d) => d.id));
     const responses = feedback.filter((f) => ids.has(f.booking_id));
+    // a request that no longer applies (trainer gone, training cancelled or delivered) doesn't count
+    const asked = requests.find((r) => ids.has(r.booking_id) && isChangeKind(r.kind) && stillApplies(r.kind, sorted, today));
+    const changeRequest = asked && isChangeKind(asked.kind) ? asked.kind : null;
     return {
       key,
       company: deal?.company_name || null,
@@ -193,7 +202,9 @@ export function buildTrainings(input: {
       score: nps(responses.map((f) => f.recommend).filter((x): x is number => x != null)),
       stage,
       confirmation: confirmationLabel(live),
-      attention: needsAttention(live, stage, content, today),
+      changeRequest,
+      // a waiting change request always needs Training Excellence
+      attention: !!changeRequest || needsAttention(live, stage, content, today),
     };
   });
   return out.sort(compareTrainings);

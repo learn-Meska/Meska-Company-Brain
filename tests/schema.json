@@ -39,7 +39,20 @@
     "contact_email",
     "contact_mobile",
     "deal_id",
-    "delivery_report"
+    "delivery_report",
+    "delivery_reminder_sent_at"
+  ],
+  "training_change_requests": [
+    "id",
+    "booking_id",
+    "kind",
+    "reason",
+    "requested_by",
+    "status",
+    "resolved_by",
+    "resolved_at",
+    "resolution_note",
+    "created_at"
   ],
   "deals": [
     "id",

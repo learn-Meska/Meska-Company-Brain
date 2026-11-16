@@ -1,4 +1,5 @@
-// Training Excellence reassigns or cancels a whole training, and a trainer marks a day as delivered with a brief and audio.
+// Training Excellence assigns, reassigns or cancels a training; Growth edits a day and asks for changes without
+// ever picking the trainer; and a trainer marks a day as delivered with a brief and audio.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb } from "./support/fake-db";
@@ -16,6 +17,8 @@ const h = vi.hoisted(() => ({
   me: { id: "manager-1", role: "approver", full_name: "Mahmoud", trainer_id: null as string | null },
   notified: [] as { to: string[]; title: string }[],
   audits: [] as string[],
+  // the trainers the availability search finds free
+  free: [] as { id: string; full_name?: string }[],
 }));
 
 vi.mock("@/lib/supabase", () => ({ db: () => h.fake.client, authClient: async () => ({}) }));
@@ -37,7 +40,7 @@ vi.mock("@/lib/auth", async () => {
   requireTrainer: async () => h.me,
 };
 });
-vi.mock("@/lib/search", () => ({ searchTrainers: async () => ({ matches: [], slots: [], unavailableCount: 0 }) }));
+vi.mock("@/lib/search", () => ({ searchTrainers: async () => ({ matches: h.free, slots: [], unavailableCount: 0 }) }));
 vi.mock("@/lib/scoring", () => ({ getSetting: async (_k: string, fallback: unknown) => fallback }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/notify", async (importOriginal) => {
@@ -51,12 +54,16 @@ vi.mock("@/lib/notify", async (importOriginal) => {
       ...(roles.includes("content") ? [{ id: "content-1", email: "content@meska.ai", full_name: "Content Person" }] : []),
     ],
     userById: async (id: string | null) => (id === "growth-1" ? { id, email: "growth@meska.ai", full_name: "Growth Person" } : null),
+    // the requester, while still on the team
+    staffById: async (id: string | null) => (id === "growth-1" ? { id, email: "growth@meska.ai", full_name: "Growth Person" } : null),
     userWithRole: async () => null,
     trainerRecipient: async () => ({ id: "", email: "trainer@example.com", full_name: "Trainer One" }),
   };
 });
 
-const { cancelTraining, createAudioUpload, deleteTraining, reassignTraining, recordAudioFile, recordBriefFile, submitBrief } = await import("@/app/(app)/bookings/actions");
+const { assignTrainer, cancelTraining, createAudioUpload, deleteTraining, editAvailability, editBooking, editTrainerOptions, reassignTraining, recordAudioFile, recordBriefFile, respondBooking, submitBrief } = await import("@/app/(app)/bookings/actions");
+const { requestChange, resolveChangeRequest, withdrawChangeRequest } = await import("@/app/(app)/bookings/change-actions");
+const { saveParticipants } = await import("@/app/(app)/bookings/deal-actions");
 
 const day = (id: string, n: number, over: Record<string, unknown> = {}) => ({
   id,
@@ -94,6 +101,191 @@ beforeEach(() => {
   h.me = { id: "manager-1", role: "approver", full_name: "Mahmoud", trainer_id: null };
   h.notified = [];
   h.audits = [];
+  h.free = [];
+});
+
+const asGrowth = (id = "growth-1") => void (h.me = { id, role: "growth", full_name: "Growth Person", trainer_id: null });
+const asManager = () => void (h.me = { id: "manager-1", role: "approver", full_name: "Mahmoud", trainer_id: null });
+
+describe("assigning a trainer to Growth's request", () => {
+  beforeEach(() => {
+    h.fake.tables.bookings = [day(NEXT_DAY, 1, { status: "needs_trainer", trainer_id: null })];
+  });
+  it("emails the trainer and tells the team, including the Growth requester", async () => {
+    expect(await assignTrainer([{ bookingId: NEXT_DAY, trainerId: TRAINER }])).toEqual({ ok: expect.stringMatching(/^Assigned/) });
+    expect(row(NEXT_DAY)).toMatchObject({ status: "awaiting_trainer", trainer_id: TRAINER, approver_id: "manager-1" });
+    expect(h.notified).toEqual([
+      { to: ["trainer@example.com"], title: "New training assigned: AI in HR — Day 1" },
+      { to: ["admin@meska.ai", "content@meska.ai", "growth@meska.ai"], title: "Mahmoud assigned Trainer One to AI in HR" },
+    ]);
+    expect(h.audits).toEqual(["trainer_assigned"]);
+  });
+  it("only Training Excellence and admins assign; Growth never does", async () => {
+    for (const role of ["growth", "content", "trainer"]) {
+      h.me = { ...h.me, role };
+      await expect(assignTrainer([{ bookingId: NEXT_DAY, trainerId: TRAINER }])).rejects.toThrow(/REDIRECT/);
+    }
+    expect(row(NEXT_DAY)).toMatchObject({ status: "needs_trainer", trainer_id: null });
+  });
+});
+
+describe("Growth edits a day without picking the trainer", () => {
+  const NEW_DATE = "2099-01-11";
+  const fields = (over: Record<string, string> = {}) => form({ id: NEXT_DAY, program_name: "AI in HR", day_number: "1", date: FUTURE, start: "10:00", end: "15:00", location: "Cairo", content: "", ...over });
+  beforeEach(() => {
+    asGrowth();
+    h.fake.tables.bookings = [day(NEXT_DAY, 1, { status: "awaiting_trainer" })];
+  });
+  it("can't choose or remove the trainer, even by calling the action directly", async () => {
+    for (const pick of ["44444444-4444-4444-8444-444444444444", "none"]) {
+      expect(await editBooking(fields({ trainer_id: pick }))).toEqual({ error: expect.stringMatching(/Training Excellence assigns the trainer/) });
+    }
+    expect(row(NEXT_DAY)).toMatchObject({ trainer_id: TRAINER, status: "awaiting_trainer" });
+    await expect(editTrainerOptions(NEXT_DAY, { date: NEW_DATE, start: "10:00", end: "15:00" })).rejects.toThrow(/REDIRECT/);
+  });
+  it("only learns yes or no about the new date and time", async () => {
+    h.free = [{ id: TRAINER, full_name: "Trainer One" }];
+    const r = await editAvailability(NEXT_DAY, { date: NEW_DATE, start: "10:00", end: "15:00" });
+    expect(r).toEqual({ trainerFree: true, otherFree: false });
+    expect(JSON.stringify(r)).not.toMatch(/Trainer One|3333/);
+    h.free = [{ id: "someone-else" }];
+    expect(await editAvailability(NEXT_DAY, { date: NEW_DATE, start: "10:00", end: "15:00" })).toEqual({ trainerFree: false, otherFree: true });
+  });
+  it("keeps the trainer when they are free at the new date", async () => {
+    h.free = [{ id: TRAINER }];
+    expect(await editBooking(fields({ date: NEW_DATE }))).toEqual({ ok: expect.stringMatching(/^Saved/) });
+    expect(row(NEXT_DAY)).toMatchObject({ date: NEW_DATE, trainer_id: TRAINER, status: "awaiting_trainer" });
+  });
+  it("sends the day back to Training Excellence when the trainer isn't free at the new date", async () => {
+    expect(await editBooking(fields({ date: NEW_DATE }))).toEqual({ ok: expect.stringMatching(/went back to Training Excellence/) });
+    expect(row(NEXT_DAY)).toMatchObject({ date: NEW_DATE, trainer_id: null, status: "needs_trainer", approver_id: null });
+    expect(h.notified.map((n) => n.title)).toEqual(["You are no longer assigned: AI in HR — Day 1", "Training updated: AI in HR — Day 1"]);
+    expect(h.audits).toEqual(["booking_edited", "trainer_removed"]);
+  });
+});
+
+describe("change requests", () => {
+  const REASON = "The client asked for a trainer with banking experience.";
+  const NOTE = "The client approved this trainer in writing last week.";
+  const requests = () => h.fake.tables.training_change_requests ?? [];
+  const ask = (kind = "trainer", id = LAST_DAY) => requestChange(form({ id, kind, reason: REASON }));
+
+  it("Growth asks for a different trainer with a reason; Training Excellence is told, the trainer is not", async () => {
+    asGrowth();
+    expect(await requestChange(form({ id: LAST_DAY, kind: "trainer", reason: "no" }))).toEqual({ error: expect.stringMatching(/reason/) });
+    expect(await ask()).toEqual({ ok: expect.stringMatching(/Request sent/) });
+    expect(requests()).toMatchObject([{ booking_id: LAST_DAY, kind: "trainer", reason: REASON, requested_by: "growth-1", status: "open" }]);
+    expect(h.notified).toEqual([{ to: ["admin@meska.ai"], title: "Growth Person asked for a different trainer: AI in HR" }]);
+    expect(h.audits).toEqual(["change_requested"]);
+    // one request is open per training at a time, whichever day it is raised from
+    expect(await ask("date", NEXT_DAY)).toEqual({ error: expect.stringMatching(/already waiting/) });
+    expect(requests()).toHaveLength(1);
+  });
+  it("only on a training that Growth login can open, and never a trainer or the content team", async () => {
+    asGrowth("growth-2");
+    expect(await ask()).toEqual({ error: "Training not found." });
+    for (const role of ["trainer", "content", "approver"]) {
+      h.me = { ...h.me, role };
+      await expect(ask()).rejects.toThrow(/REDIRECT/);
+    }
+    expect(requests()).toEqual([]);
+  });
+  it("a different trainer can't be asked for when no upcoming day has one", async () => {
+    asGrowth();
+    h.fake.tables.bookings = [day(NEXT_DAY, 1, { status: "needs_trainer", trainer_id: null })];
+    expect(await ask("trainer", NEXT_DAY)).toEqual({ error: expect.stringMatching(/has a trainer to change/) });
+    expect(await ask("cancel", NEXT_DAY)).toEqual({ ok: expect.stringMatching(/Request sent/) });
+  });
+  it("Training Excellence keeps the trainer with a note, and Growth is told", async () => {
+    asGrowth();
+    await ask();
+    asManager();
+    h.notified = [];
+    const id = String(requests()[0].id);
+    expect(await resolveChangeRequest(form({ id, outcome: "declined", note: "" }))).toEqual({ error: expect.stringMatching(/short note/) });
+    expect(await resolveChangeRequest(form({ id, outcome: "declined", note: NOTE }))).toEqual({ ok: expect.stringMatching(/^Declined/) });
+    expect(requests()[0]).toMatchObject({ status: "declined", resolution_note: NOTE, resolved_by: "manager-1" });
+    expect(h.notified).toEqual([{ to: ["growth@meska.ai"], title: "Declined: your request for a different trainer — AI in HR" }]);
+    // a request is answered once
+    expect(await resolveChangeRequest(form({ id, outcome: "done", note: "" }))).toEqual({ error: expect.stringMatching(/already answered/) });
+    // and Growth can then send a new one
+    asGrowth();
+    expect(await ask()).toEqual({ ok: expect.stringMatching(/Request sent/) });
+  });
+  it("reassigning the trainer closes the request on its own and tells Growth", async () => {
+    asGrowth();
+    await ask();
+    asManager();
+    h.notified = [];
+    await reassignTraining(form({ id: NEXT_DAY }));
+    expect(requests()[0]).toMatchObject({ status: "done", resolved_by: "manager-1" });
+    expect(h.notified.at(-1)).toEqual({ to: ["growth@meska.ai"], title: "Your change request was closed: AI in HR" });
+  });
+  it("a trainer who declines closes a request about them", async () => {
+    asGrowth();
+    h.fake.tables.bookings = [day(NEXT_DAY, 1, { status: "awaiting_trainer" })];
+    await ask("trainer", NEXT_DAY);
+    h.me = { id: "trainer-user", role: "trainer", full_name: "Trainer One", trainer_id: TRAINER };
+    expect(await respondBooking(NEXT_DAY, false, "I am travelling that week.")).toEqual({ ok: expect.any(String) });
+    expect(requests()[0]).toMatchObject({ status: "done", resolved_by: null });
+  });
+  it("cancelling the training closes a request to cancel it", async () => {
+    asGrowth();
+    await ask("cancel");
+    asManager();
+    await cancelTraining(form({ id: NEXT_DAY, reason: LONG_REASON }));
+    expect(requests()[0]).toMatchObject({ status: "done" });
+  });
+  it("Growth can withdraw a waiting request", async () => {
+    asGrowth();
+    await ask();
+    h.notified = [];
+    const id = String(requests()[0].id);
+    expect(await withdrawChangeRequest(form({ id }))).toEqual({ ok: "Request withdrawn." });
+    expect(requests()[0]).toMatchObject({ status: "withdrawn" });
+    expect(h.notified).toEqual([{ to: ["admin@meska.ai"], title: "Change request withdrawn: AI in HR" }]);
+    expect(await withdrawChangeRequest(form({ id }))).toEqual({ error: expect.stringMatching(/already answered/) });
+  });
+  it("Growth can't answer its own request", async () => {
+    asGrowth();
+    await ask();
+    await expect(resolveChangeRequest(form({ id: String(requests()[0].id), outcome: "done", note: "" }))).rejects.toThrow(/REDIRECT/);
+    expect(requests()[0]).toMatchObject({ status: "open" });
+  });
+});
+
+describe("adding the participant list after the deal was sent", () => {
+  const people = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `Person ${i + 1}`, title: "", department: "HR" }));
+  beforeEach(() => {
+    h.fake.tables.deal_participants = [];
+  });
+  it("Growth adds it on its own deal and can replace it; the team and the content team are told", async () => {
+    asGrowth();
+    expect(await saveParticipants(NEXT_DAY, people(1))).toEqual({ ok: expect.stringMatching(/^Saved 1 participant\./) });
+    expect(h.fake.tables.deal_participants).toMatchObject([{ deal_id: DEAL, position: 1, name: "Person 1", title: null, department: "HR" }]);
+    expect(h.notified).toEqual([{ to: ["admin@meska.ai", "content@meska.ai"], title: "Participant list added: AI in HR" }]);
+    await saveParticipants(NEXT_DAY, people(3));
+    expect(h.fake.tables.deal_participants.map((p) => p.name)).toEqual(["Person 1", "Person 2", "Person 3"]);
+    expect(h.notified.at(-1)!.title).toBe("Participant list updated: AI in HR");
+    expect(h.audits).toEqual(["participants_updated", "participants_updated"]);
+  });
+  it("refuses an empty or broken list and leaves the saved one alone", async () => {
+    asGrowth();
+    await saveParticipants(NEXT_DAY, people(2));
+    expect(await saveParticipants(NEXT_DAY, [])).toEqual({ error: expect.stringMatching(/no participants/) });
+    expect(await saveParticipants(NEXT_DAY, "x")).toEqual({ error: expect.stringMatching(/participants file/) });
+    expect(await saveParticipants(NEXT_DAY, [{ name: "  " }])).toEqual({ error: expect.stringMatching(/name is missing/) });
+    expect(h.fake.tables.deal_participants).toHaveLength(2);
+  });
+  it("not on someone else's deal, and never a trainer or the content team", async () => {
+    asGrowth("growth-2");
+    expect(await saveParticipants(NEXT_DAY, people(1))).toEqual({ error: "Training not found." });
+    for (const role of ["trainer", "content"]) {
+      h.me = { ...h.me, role };
+      await expect(saveParticipants(NEXT_DAY, people(1))).rejects.toThrow(/REDIRECT/);
+    }
+    expect(h.fake.tables.deal_participants).toEqual([]);
+  });
 });
 
 describe("reassigning a training", () => {

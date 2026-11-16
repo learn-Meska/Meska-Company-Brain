@@ -8,6 +8,8 @@ import { DeliveryReportCard } from "@/components/delivery-report";
 import { TeamFeedbackCard } from "@/components/team-feedback";
 import { seesTeamFeedback } from "@/lib/team-feedback";
 import { DeleteTraining } from "@/components/delete-training";
+import { ChangeRequestBanner, ChangeRequestSection } from "@/components/change-requests";
+import { trainingChangeRequests } from "@/lib/change-requests";
 import { Form, Submit } from "@/components/form";
 import { SwapIcon, TrashIcon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
@@ -41,7 +43,7 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
     days = (rows ?? []) as BookingRow[];
   }
   const ids = days.map((d) => d.id);
-  const [{ data: deal }, { data: contentFiles }, { data: mats }, { data: responses }, { data: requester }, dealInfo, rule] = await Promise.all([
+  const [{ data: deal }, { data: contentFiles }, { data: mats }, { data: responses }, { data: requester }, dealInfo, rule, changes] = await Promise.all([
     b.deal_id ? db().from("deals").select("id, company_name, content_guide, content_submitted_at, created_at").eq("id", b.deal_id).maybeSingle() : Promise.resolve({ data: null }),
     b.deal_id ? db().from("deal_content").select("deal_id").eq("deal_id", b.deal_id) : Promise.resolve({ data: [] }),
     db().from("booking_materials").select("id, booking_id, file_name, file_path, created_at").in("booking_id", ids).eq("kind", "brief").order("created_at"),
@@ -49,7 +51,9 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
     b.created_by ? db().from("app_users").select("id, full_name").eq("id", b.created_by).maybeSingle() : Promise.resolve({ data: null }),
     getDealInfo(b.deal_id),
     getSetting("cancellation", { notice_hours: 48, min_reason_chars: 150 }),
+    trainingChangeRequests(b),
   ]);
+  const viewer = { role: me.role, canAssign: can(me, "te.assign"), canEdit: can(me, "te.edit"), canCancel: can(me, "te.cancel") };
   const files = (mats ?? []) as Material[];
   const feedback = (responses ?? []) as { booking_id: string; recommend: number | null }[];
   const person = requester as { id: string; full_name: string } | null;
@@ -129,6 +133,8 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
         </dl>
       </section>
 
+      <ChangeRequestBanner bookingId={b.id} data={changes} viewer={viewer} />
+
       {toAssign && (
         <section className="card border-2 border-[#F4A9C4]">
           <div className="eyebrow">Needs a trainer</div>
@@ -181,6 +187,8 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
         ))}
       </section>
 
+      <ChangeRequestSection bookingId={b.id} data={changes} viewer={viewer} canChangeItself={false} />
+
       {seesTeamFeedback(me.role) && <TeamFeedbackCard booking={b} me={me} />}
 
       <section className="card space-y-3">
@@ -210,7 +218,7 @@ export default async function TrainingPage({ params }: PageProps<"/dashboard/[id
       </section>
 
       {b.deal_id ? (
-        <DealCard dealId={b.deal_id} bookingId={b.id} actions={trainingActions} showValue={can(me, "te.deal_value")} />
+        <DealCard dealId={b.deal_id} bookingId={b.id} actions={trainingActions} showValue={can(me, "te.deal_value")} canEditParticipants={can(me, "te.edit")} />
       ) : (
         trainingActions && <div className="grid gap-3 lg:grid-cols-2">{trainingActions}</div>
       )}

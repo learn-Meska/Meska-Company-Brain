@@ -3,6 +3,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/status";
 import { requireTrainer } from "@/lib/auth";
 import { db } from "@/lib/supabase";
+import { deliveryState } from "@/lib/delivery";
 import { fmtDate, fmtTime, todayISO, trainerTitle } from "@/lib/format";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 
@@ -17,22 +18,39 @@ export default async function MyBookingsPage({ searchParams }: PageProps<"/me/bo
     .order("date");
   const rows = (data ?? []) as BookingRow[];
   const today = todayISO();
-  const upcoming = rows.filter((b) => b.date >= today && b.status !== "cancelled");
-  const other = rows.filter((b) => !upcoming.includes(b)).reverse();
-  const Item = ({ b }: { b: BookingRow }) => (
-    <Link href={`/me/bookings/${b.id}`} className={`card flex flex-wrap items-center justify-between gap-3 transition hover:border-blue ${b.status === "awaiting_trainer" ? "border-blue" : ""}`}>
-      <div>
-        <b>{trainerTitle(b)}</b>
-        <div className="text-sm text-muted">{fmtDate(b.date)} · {fmtTime(b.start_time)} – {fmtTime(b.end_time)}</div>
-        <div className="text-xs text-faint">{b.industry?.name} · {b.location ?? "Location TBC"}</div>
-      </div>
-      <StatusBadge status={b.status} />
-    </Link>
-  );
+  // Days that need the trainer now come first: a session that started and isn't marked as delivered, or an
+  // assignment whose date passed without an answer. They would otherwise sink into "Past".
+  const due = rows.filter((b) => deliveryState(b) === "ready" || (b.status === "awaiting_trainer" && b.date < today));
+  const upcoming = rows.filter((b) => !due.includes(b) && b.date >= today && b.status !== "cancelled");
+  const other = rows.filter((b) => !due.includes(b) && !upcoming.includes(b)).reverse();
+  const Item = ({ b }: { b: BookingRow }) => {
+    const state = deliveryState(b);
+    return (
+      <Link href={`/me/bookings/${b.id}`} className={`card flex flex-wrap items-center justify-between gap-3 transition hover:border-blue ${b.status === "awaiting_trainer" || state === "ready" ? "border-blue" : ""}`}>
+        <div>
+          <b>{trainerTitle(b)}</b>
+          <div className="text-sm text-muted">{fmtDate(b.date)} · {fmtTime(b.start_time)} – {fmtTime(b.end_time)}</div>
+          <div className="text-xs text-faint">{b.industry?.name} · {b.location ?? "Location TBC"}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {state === "ready" && <span className="badge bg-warn-bg text-warn">Report due · mark as delivered</span>}
+          {state === "done" && <span className="badge bg-good-bg text-good">Delivered</span>}
+          <StatusBadge status={b.status} />
+        </div>
+      </Link>
+    );
+  };
   return (
     <div className="space-y-5">
       <PageHeader kicker="My trainings" title={<>Booked days</>} />
       {declined && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Your response was sent. Training Excellence will assign another trainer.</p>}
+      {due.length > 0 && (
+        <>
+          <h2 className="h2">Needs your action</h2>
+          <div className="space-y-2">{due.map((b) => <Item key={b.id} b={b} />)}</div>
+          <h2 className="h2 pt-2">Upcoming</h2>
+        </>
+      )}
       <div className="space-y-2">{upcoming.length ? upcoming.map((b) => <Item key={b.id} b={b} />) : <p className="card text-muted">No upcoming trainings.</p>}</div>
       {other.length > 0 && (
         <>

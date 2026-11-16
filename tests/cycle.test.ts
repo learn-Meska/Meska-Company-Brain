@@ -272,3 +272,27 @@ describe("dashboard filters", () => {
     expect(confirmationFilter("—")).toBeNull();
   });
 });
+
+describe("change requests on the dashboard", () => {
+  it("a waiting request flags the training, which then always needs attention", () => {
+    const d = day();
+    const [row] = build([d], { changeRequests: [{ booking_id: d.id, kind: "trainer" }] });
+    expect(row).toMatchObject({ changeRequest: "trainer", attention: true });
+    expect(build([day()])[0]).toMatchObject({ changeRequest: null, attention: false });
+  });
+  it("a request raised from any day counts for the whole training", () => {
+    const one = day({ deal_id: "d1", day_number: 1 });
+    const two = day({ deal_id: "d1", day_number: 2 });
+    const [row] = build([one, two], { deals: [deal()], changeRequests: [{ booking_id: two.id, kind: "date" }] });
+    expect(row.changeRequest).toBe("date");
+  });
+  it("a request that no longer applies is ignored", () => {
+    const noTrainer = day({ status: "needs_trainer", trainer_id: null, trainers: null });
+    expect(build([noTrainer], { changeRequests: [{ booking_id: noTrainer.id, kind: "trainer" }] })[0].changeRequest).toBeNull();
+    const delivered = day({ date: PAST, finished_at: DONE });
+    expect(build([delivered], { changeRequests: [{ booking_id: delivered.id, kind: "cancel" }] })[0].changeRequest).toBeNull();
+    expect(build([day()], { changeRequests: [{ booking_id: "another-training", kind: "trainer" }] })[0].changeRequest).toBeNull();
+    const d = day();
+    expect(build([d], { changeRequests: [{ booking_id: d.id, kind: "junk" }] })[0].changeRequest).toBeNull();
+  });
+});

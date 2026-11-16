@@ -32,6 +32,18 @@ export const dayError = (d: { day_number: number; date: string; start: string; e
         ? `Day ${d.day_number}: the time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM).`
         : null;
 
+// The first two days that share a date and a slot (morning or evening): one trainer can't deliver both.
+export function clashingDays(days: { day_number: number; date: string; start: string; end: string }[]): [number, number] | null {
+  for (let i = 0; i < days.length; i++) {
+    for (let j = i + 1; j < days.length; j++) {
+      if (days[i].date !== days[j].date) continue;
+      const slots = slotsFor(days[j].start, days[j].end);
+      if (slotsFor(days[i].start, days[i].end).some((s) => slots.includes(s))) return [days[i].day_number, days[j].day_number];
+    }
+  }
+  return null;
+}
+
 /* ---------- Participants (the audience, uploaded as a CSV) ---------- */
 
 export type Participant = { name: string; title: string; department: string };
@@ -106,8 +118,9 @@ export function parseParticipants(text: string): { participants: Participant[]; 
 }
 
 // The server re-checks the list the browser parsed (it can be called with anything).
+// The audience is optional: an empty list is fine, and can be added later from the deal.
 export function participantsError(list: unknown): string | null {
-  if (!Array.isArray(list) || !list.length) return "Upload the participants file (name, title, department).";
+  if (!Array.isArray(list)) return "Upload the participants file again (name, title, department).";
   if (list.length > MAX_PARTICIPANTS) return `A deal can list at most ${MAX_PARTICIPANTS} participants.`;
   for (const [i, p] of list.entries()) {
     if (!p || typeof p !== "object") return `Participant ${i + 1} is not valid.`;
@@ -205,7 +218,9 @@ export function proposalPathError(p: ProposalFile | undefined, userId: string) {
 }
 
 // Every check createRequest makes before touching the database, in the order the form shows the steps.
-export function requestError(input: NewRequest, who: { role: string; userId: string; today: string }): string | null {
+// canAssign: the booking team (te.assign) may pick a trainer per day; Growth never does, Training Excellence
+// assigns after the request arrives. nowTime ("HH:MM", Cairo) lets a day today be refused once its start passed.
+export function requestError(input: NewRequest, who: { canAssign: boolean; userId: string; today: string; nowTime?: string }): string | null {
   if (!input || typeof input !== "object") return "Fill in the request.";
   // Step 1: the client & program
   if (typeof input.company_name !== "string" || !input.company_name.trim()) return "Enter the company name.";
@@ -215,8 +230,8 @@ export function requestError(input: NewRequest, who: { role: string; userId: str
   if (typeof input.industry_id !== "string" || !UUID.test(input.industry_id)) return "Pick the industry.";
   const ce = contactError(input.contact);
   if (ce) return ce;
-  // Step 2: participants
-  const pe = participantsError(input.participants);
+  // Step 2: participants (optional)
+  const pe = participantsError(input.participants ?? []);
   if (pe) return pe;
   // Step 3: proposal and value
   const fe = proposalPathError(input.proposal, who.userId);
@@ -233,11 +248,15 @@ export function requestError(input: NewRequest, who: { role: string; userId: str
     const e = dayError(d);
     if (e) return e;
     if (d.date < who.today) return `Day ${d.day_number}: ${PAST_DATE}`;
+    if (d.date === who.today && who.nowTime && d.start <= who.nowTime) return `Day ${d.day_number}: that start time has already passed today.`;
     if (d.trainer_id && !UUID.test(d.trainer_id)) return `Day ${d.day_number}: pick the trainer again.`;
     if (typeof d.location !== "string") return `Check the location for Day ${d.day_number}.`;
   }
-  // Growth must choose the trainer for every day; admins and booking managers may leave days to assign later.
-  const missing = input.days.find((d) => !d.trainer_id);
-  if (who.role === "growth" && missing) return `Choose a trainer for Day ${missing.day_number}.`;
+  // Growth never chooses the trainer: every day goes to Training Excellence, who assign one.
+  const picked = input.days.find((d) => d.trainer_id);
+  if (!who.canAssign && picked) return `Training Excellence assigns the trainer. Send Day ${picked.day_number} without one.`;
+  // "Same trainer for all days" can't hold when two days share a date and slot.
+  const clash = input.same_trainer ? clashingDays(input.days) : null;
+  if (clash) return `Day ${clash[0]} and Day ${clash[1]} are at the same time, so one trainer can't deliver both. Change one of them or untick “Same trainer for all days”.`;
   return null;
 }

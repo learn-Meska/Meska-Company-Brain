@@ -1,6 +1,22 @@
 // The trainer's delivery report for one training day. Pure rules, tested in tests/delivery.test.ts.
 
-export type DeliveryReport = { attended: number; topics: string; engagement: number; challenges: string; follow_up: string };
+import { cairoStart } from "./format";
+
+// A day can be marked as delivered from the moment its session starts (Cairo time), not before.
+export const deliveryOpen = (b: { date: string; start_time: string }, now = Date.now()) => now >= cairoStart(b.date, b.start_time).getTime();
+
+// Where a training day stands for its trainer's "Mark as delivered" button:
+// confirm_first: the trainer hasn't confirmed the day yet · not_yet: confirmed, the session hasn't started ·
+// ready: the session started and no report was sent · done: delivered · none: nothing to deliver (cancelled…).
+export type DeliveryState = "none" | "confirm_first" | "not_yet" | "ready" | "done";
+export function deliveryState(b: { status: string; date: string; start_time: string; finished_at: string | null }, now = Date.now()): DeliveryState {
+  if (b.status === "awaiting_trainer") return "confirm_first";
+  if (b.status !== "confirmed") return "none";
+  if (b.finished_at) return "done";
+  return deliveryOpen(b, now) ? "ready" : "not_yet";
+}
+
+export type DeliveryReport ={ attended: number; topics: string; engagement: number; challenges: string; follow_up: string };
 export type DeliveryInput = { brief?: unknown; attended?: unknown; topics?: unknown; engagement?: unknown; challenges?: unknown; follow_up?: unknown };
 
 export const ENGAGEMENT_LABEL: Record<number, string> = { 1: "Very low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very high" };
