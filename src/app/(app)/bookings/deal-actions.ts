@@ -43,7 +43,7 @@ export async function saveParticipants(bookingId: string, list: unknown) {
 
   // The content team writes for this audience, so everyone on the training hears about it.
   const what = old.length ? "updated" : "added";
-  await notify(await trainingTeam({ deal_id: dealId, created_by: b.created_by }, me.id), {
+  await notify(await trainingTeam({ deal_id: dealId, created_by: b.created_by }, me), {
     title: `Participant list ${what}: ${b.program_name}`,
     body: `${me.full_name} · ${people.length} ${people.length === 1 ? "participant" : "participants"}`,
     link: `/bookings/${b.id}`,

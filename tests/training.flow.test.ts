@@ -156,10 +156,24 @@ describe("Growth edits a day without picking the trainer", () => {
     expect(await editBooking(fields({ date: NEW_DATE }))).toEqual({ ok: expect.stringMatching(/^Saved/) });
     expect(row(NEXT_DAY)).toMatchObject({ date: NEW_DATE, trainer_id: TRAINER, status: "awaiting_trainer" });
   });
+  it("moving Day 1 after Day 2 renumbers the days by date and tells Training Excellence which day changed", async () => {
+    h.free = [{ id: TRAINER }];
+    h.fake.tables.bookings = [day(NEXT_DAY, 1, { status: "awaiting_trainer" }), day(LAST_DAY, 2, { date: NEW_DATE, status: "awaiting_trainer" })];
+    expect(await editBooking(fields({ date: "2099-01-12" }))).toEqual({ ok: expect.stringMatching(/^Saved/) });
+    expect(row(NEXT_DAY)).toMatchObject({ date: "2099-01-12", day_number: 2 });
+    expect(row(LAST_DAY)).toMatchObject({ date: NEW_DATE, day_number: 1 });
+    const team = h.notified.find((n) => n.title.startsWith("Growth changed"));
+    expect(team?.title).toBe("Growth changed date: AI in HR — Day 2 (Mon 12 Jan)");
+  });
+  it("a typed day number or program name is ignored: the day keeps its place and the training its name", async () => {
+    h.free = [{ id: TRAINER }];
+    expect(await editBooking(fields({ day_number: "2", program_name: "Something else", location: "Giza" }))).toEqual({ ok: expect.stringMatching(/^Saved/) });
+    expect(row(NEXT_DAY)).toMatchObject({ day_number: 1, program_name: "AI in HR", location: "Giza" });
+  });
   it("sends the day back to Training Excellence when the trainer isn't free at the new date", async () => {
     expect(await editBooking(fields({ date: NEW_DATE }))).toEqual({ ok: expect.stringMatching(/went back to Training Excellence/) });
     expect(row(NEXT_DAY)).toMatchObject({ date: NEW_DATE, trainer_id: null, status: "needs_trainer", approver_id: null });
-    expect(h.notified.map((n) => n.title)).toEqual(["You are no longer assigned: AI in HR — Day 1", "Training updated: AI in HR — Day 1"]);
+    expect(h.notified.map((n) => n.title)).toEqual(["You are no longer assigned: AI in HR — Day 1", "Trainer needed — Growth changed date: AI in HR — Day 1 (Sun 11 Jan)"]);
     expect(h.audits).toEqual(["booking_edited", "trainer_removed"]);
   });
 });
