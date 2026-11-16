@@ -9,7 +9,7 @@ import { db } from "@/lib/supabase";
 import { esc, siteUrl } from "@/lib/email";
 import { trainingIcs } from "@/lib/ics";
 import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, nowTimeCairo, slotsFor, todayISO, trainerTitle } from "@/lib/format";
-import { assignableTrainers } from "@/lib/availability";
+import { assignableTrainers, trainerStatusesFor } from "@/lib/availability";
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
 import { checkAudioFile, checkFile, isAudioPath, safeName } from "@/lib/files";
@@ -264,27 +264,19 @@ export async function createRequest(input: NewRequest) {
 
 /* ---------- Assign a trainer to a request ---------- */
 
-// Free trainers for every day of a request (time availability only for now) (and, for multi-day requests, those free on all days).
+// The assign screen, booking team only: every day still waiting for a trainer, every active trainer, and for
+// each day whether that trainer is free, already booked or hasn't marked the slot as available.
 export async function requestCandidates(bookingId: string) {
   await requireAccess("te.assign");
   const [b] = await loadBookings([bookingId]);
   if (!b) return { error: "Request not found." };
   // Days that already went by can't be assigned, so a training reassigned partway only asks for the days left.
   const days = b.batch_id ? (await loadBatch(b.batch_id)).filter((d) => d.status === "needs_trainer" && d.date >= todayISO()) : [b];
-  const lists = await Promise.all(
-    days.map((d) => assignableTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5) })),
-  );
-  const slim = (t: Awaited<ReturnType<typeof assignableTrainers>>[number]) => ({
-    id: t.id,
-    full_name: t.full_name,
-    total: t.total,
-    tier: t.tier ? { name: t.tier.name, color: t.tier.color } : null,
-    feedback: t.feedback.average,
-    delivered: t.delivered,
-  });
-  const perDay = lists.map((l) => l.map(slim));
-  const common = perDay.length > 1 ? perDay[0].filter((t) => perDay.every((list) => list.some((x) => x.id === t.id))) : [];
-  return { days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, start: d.start_time, end: d.end_time, matches: perDay[i] })), common };
+  const r = await trainerStatusesFor(days.map((d) => ({ id: d.id, date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5) })));
+  return {
+    trainers: r.trainers,
+    days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, start: d.start_time, end: d.end_time, slots: r.days[i].slots, status: r.days[i].status })),
+  };
 }
 
 async function loadBatch(batchId: string) {

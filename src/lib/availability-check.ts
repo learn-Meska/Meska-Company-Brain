@@ -46,3 +46,17 @@ export function daysFromParam(v: unknown): CheckDay[] {
   }
   return out;
 }
+
+// The assign screen: where a trainer stands for one day. "free" = marked available in every slot the time
+// touches and not booked in any of them; "booked" = taken by another training in one of those slots;
+// "unavailable" = hasn't marked every slot as available. Booked wins, since it is the clearer reason.
+export type TrainerDayStatus = "free" | "booked" | "unavailable";
+export function trainerDayStatus(slots: string[], available: Set<string> | undefined, booked: Set<string> | undefined): TrainerDayStatus {
+  if (slots.some((s) => booked?.has(s))) return "booked";
+  return slots.length && slots.every((s) => available?.has(s)) ? "free" : "unavailable";
+}
+
+// Two days of the same request on the same date and slot can't go to one trainer.
+export function sameTimeClash(a: { date: string; slots: string[] }, b: { date: string; slots: string[] }) {
+  return a.date === b.date && a.slots.some((s) => b.slots.includes(s));
+}

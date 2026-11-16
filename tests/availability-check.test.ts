@@ -1,7 +1,7 @@
 // Growth's availability check answers yes or no per day and never says who is free.
 
 import { describe, expect, it } from "vitest";
-import { availabilityAnswer, daysFromParam, daysToParam, MAX_CHECK_DAYS, readAvailabilityQuery } from "@/lib/availability-check";
+import { availabilityAnswer, daysFromParam, daysToParam, MAX_CHECK_DAYS, readAvailabilityQuery, sameTimeClash, trainerDayStatus } from "@/lib/availability-check";
 
 const TODAY = "2026-11-10";
 const day = (over: Record<string, unknown> = {}) => ({ date: "2026-11-20", start: "10:00", end: "15:00", ...over });
@@ -51,5 +51,23 @@ describe("carrying the days to the New deal form", () => {
     expect(daysFromParam("2026-11-20T10:00-15:00,garbage,2026-11-21T06:00-08:00,<script>")).toEqual([day()]);
     expect(daysFromParam(undefined)).toEqual([]);
     expect(daysFromParam(["2026-11-20T10:00-15:00"])).toEqual([]);
+  });
+});
+
+describe("where a trainer stands on a day (assign screen)", () => {
+  const set = (...s: string[]) => new Set(s);
+  it("is free only when available in every slot and booked in none", () => {
+    expect(trainerDayStatus(["morning"], set("morning"), undefined)).toBe("free");
+    expect(trainerDayStatus(["morning", "evening"], set("morning"), undefined)).toBe("unavailable");
+    expect(trainerDayStatus(["morning"], undefined, undefined)).toBe("unavailable");
+  });
+  it("booked wins over available", () => {
+    expect(trainerDayStatus(["morning"], set("morning"), set("morning"))).toBe("booked");
+    expect(trainerDayStatus(["morning", "evening"], undefined, set("evening"))).toBe("booked");
+  });
+  it("two days clash when they share a date and a slot", () => {
+    expect(sameTimeClash({ date: "2026-11-17", slots: ["morning"] }, { date: "2026-11-17", slots: ["morning"] })).toBe(true);
+    expect(sameTimeClash({ date: "2026-11-17", slots: ["morning"] }, { date: "2026-11-17", slots: ["evening"] })).toBe(false);
+    expect(sameTimeClash({ date: "2026-11-17", slots: ["morning"] }, { date: "2026-11-18", slots: ["morning"] })).toBe(false);
   });
 });
