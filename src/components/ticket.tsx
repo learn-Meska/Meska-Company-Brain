@@ -209,7 +209,9 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
         )}
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      {/* The Meska team's page shows only the content and the delivery report here: materials, audience and the
+          detail list are the trainer's (the team has the deal card and the contact form below). */}
+      <div className={trainerView ? "grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start" : "space-y-5"}>
         <div className="space-y-5">
           {/* Content from the content team */}
           {deal?.content && (
@@ -279,6 +281,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
           )}
 
           {/* Materials */}
+          {trainerView && (
           <Panel icon={<LayersIcon size={16} />} title="Materials" meta={`(${materials.length})`} action={canUpload ? <MaterialUploader bookingId={b.id} /> : undefined}>
             {materials.length === 0 ? (
               <p className="rounded-xl bg-ds-subtle/50 px-4 py-6 text-center text-sm text-ds-text">No materials uploaded yet.</p>
@@ -292,8 +295,10 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
               </ul>
             )}
           </Panel>
+          )}
         </div>
 
+        {trainerView && (
         <aside className="space-y-5 lg:sticky lg:top-20">
           {/* Training days */}
           {/* The trainer moves between their days here; the Meska team picks the day in Edit training. */}
@@ -366,6 +371,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
             </dl>
           </section>
         </aside>
+        )}
       </div>
     </div>
   );
