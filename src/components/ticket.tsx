@@ -9,7 +9,7 @@ import { BuildingIcon, CalendarIcon, CheckIcon, DownloadIcon, LayersIcon, PenIco
 import { asDeliveryReport, deliveryState } from "@/lib/delivery";
 import { StatusBadge } from "@/components/status";
 import { db } from "@/lib/supabase";
-import { feedbackAlwaysOpen, takesFeedback } from "@/lib/feedback-mode";
+import { deliveryAnyTime, feedbackAlwaysOpen, takesFeedback } from "@/lib/feedback-mode";
 import { feedbackWindow, isPast, fmtDate, fmtDateTime, fmtTime, programVisible, SLOT_LABEL } from "@/lib/format";
 import { bookingFeedback } from "@/lib/feedback";
 import { googleCalendarUrl } from "@/lib/ics";
@@ -61,7 +61,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
   const hideProgram = trainerView && !programVisible(b);
   const cairoToday = new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
   // "Mark as delivered" opens when the session starts; before that the trainer is told when it will.
-  const delivery = deliveryState(b);
+  const delivery = deliveryState(b, undefined, await deliveryAnyTime());
   const briefOpen = delivery === "ready" || delivery === "done";
   const startsLabel = `${fmtDate(b.date, { weekday: "short", day: "numeric", month: "short" })}, ${fmtTime(b.start_time)}`;
   const deliveryFiles = briefFiles.map((m) => ({ id: m.id, file_name: m.file_name, audio: isAudioPath(m.file_path) }));

@@ -41,3 +41,15 @@ describe("delivery report", () => {
     expect(asDeliveryReport({ topics: "x" })).toBeNull();
   });
 });
+
+describe("the any-time test switch", () => {
+  it("opens Mark as delivered before the session starts, but only for a confirmed day", async () => {
+    const { deliveryState, deliveryOpen } = await import("@/lib/delivery");
+    const day = { status: "confirmed", date: "2099-01-10", start_time: "10:00:00", finished_at: null };
+    expect(deliveryState(day)).toBe("not_yet");
+    expect(deliveryState(day, Date.now(), true)).toBe("ready");
+    expect(deliveryOpen(day, Date.now(), true)).toBe(true);
+    expect(deliveryState({ ...day, status: "awaiting_trainer" }, Date.now(), true)).toBe("confirm_first");
+    expect(deliveryState({ ...day, finished_at: "2099-01-10T15:00:00Z" }, Date.now(), true)).toBe("done");
+  });
+});

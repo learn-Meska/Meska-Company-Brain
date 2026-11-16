@@ -19,6 +19,7 @@ import { deliveryOpen, ENGAGEMENT_LABEL, readDeliveryReport, type DeliveryInput 
 import { FEEDBACK_SOURCE_LABEL, FEEDBACK_TEAM_LABEL, mayDeleteFeedback, RATING_LABEL, readTeamFeedback, seesTeamFeedback } from "@/lib/team-feedback";
 import { seesDealOf } from "@/lib/team-people";
 import { settleChangeRequests } from "@/lib/change-requests";
+import { deliveryAnyTime } from "@/lib/feedback-mode";
 import {
   renumberByDate,
   contactError,
@@ -1041,7 +1042,7 @@ async function ownConfirmedPast(bookingId: string) {
   const [b] = await loadBookings([bookingId]);
   if (!b || b.trainer_id !== me.trainer_id) return { me, error: "Training not found." } as const;
   if (b.status !== "confirmed") return { me, error: "A brief can only be added to a confirmed training." } as const;
-  if (!deliveryOpen(b)) return { me, error: "You can mark this day as delivered once the training day has started." } as const;
+  if (!deliveryOpen(b, Date.now(), await deliveryAnyTime())) return { me, error: "You can mark this day as delivered once the training day has started." } as const;
   return { me, b } as const;
 }
 

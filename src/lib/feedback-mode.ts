@@ -16,3 +16,9 @@ export const takesFeedback = (status: string) => status === "confirmed";
 export async function getFeedbackForm(): Promise<FeedbackFormDef> {
   return normalizeForm(await getSetting<unknown>("feedback_form", null));
 }
+
+// Test switch on the Feedback form page (settings "delivery_test" = {"any_time": true}): a trainer can mark a
+// confirmed day as delivered before its session starts. Off: only from the start of the session.
+export async function deliveryAnyTime() {
+  return (await getSetting("delivery_test", { any_time: false })).any_time === true;
+}

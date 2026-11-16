@@ -4,6 +4,7 @@ import { StatusBadge } from "@/components/status";
 import { requireTrainer } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { deliveryState } from "@/lib/delivery";
+import { deliveryAnyTime } from "@/lib/feedback-mode";
 import { fmtDate, fmtTime, todayISO, trainerTitle } from "@/lib/format";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 
@@ -19,13 +20,14 @@ export default async function MyBookingsPage({ searchParams }: PageProps<"/me/bo
     .order("start_time", { ascending: false });
   const rows = (data ?? []) as BookingRow[];
   const today = todayISO();
+  const anyTime = await deliveryAnyTime();
   // Days that need the trainer now come first: a session that started and isn't marked as delivered, or an
   // assignment whose date passed without an answer. They would otherwise sink into "Past".
-  const due = rows.filter((b) => deliveryState(b) === "ready" || (b.status === "awaiting_trainer" && b.date < today));
+  const due = rows.filter((b) => deliveryState(b, undefined, anyTime) === "ready" || (b.status === "awaiting_trainer" && b.date < today));
   const upcoming = rows.filter((b) => !due.includes(b) && b.date >= today && b.status !== "cancelled");
   const other = rows.filter((b) => !due.includes(b) && !upcoming.includes(b));
   const Item = ({ b }: { b: BookingRow }) => {
-    const state = deliveryState(b);
+    const state = deliveryState(b, undefined, anyTime);
     return (
       <Link href={`/me/bookings/${b.id}`} className={`card flex flex-wrap items-center justify-between gap-3 transition hover:border-blue ${b.status === "awaiting_trainer" || state === "ready" ? "border-blue" : ""}`}>
         <div>
