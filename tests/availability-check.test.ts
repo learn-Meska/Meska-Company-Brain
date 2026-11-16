@@ -4,14 +4,12 @@ import { describe, expect, it } from "vitest";
 import { availabilityAnswer, daysFromParam, daysToParam, MAX_CHECK_DAYS, readAvailabilityQuery } from "@/lib/availability-check";
 
 const TODAY = "2026-11-10";
-const INDUSTRY = "22222222-2222-4222-8222-222222222222";
 const day = (over: Record<string, unknown> = {}) => ({ date: "2026-11-20", start: "10:00", end: "15:00", ...over });
 
 describe("reading the check", () => {
-  it("accepts days with or without an industry and rebuilds them from known fields", () => {
-    expect(readAvailabilityQuery({ days: [{ ...day(), trainer_id: "x", extra: 1 }] }, TODAY)).toEqual({ days: [day()], industryId: null });
-    expect(readAvailabilityQuery({ industry_id: INDUSTRY, days: [day(), day({ date: "2026-11-21" })] }, TODAY)).toEqual({ days: [day(), day({ date: "2026-11-21" })], industryId: INDUSTRY });
-    expect(readAvailabilityQuery({ industry_id: "", days: [day()] }, TODAY)).toMatchObject({ industryId: null });
+  it("reads the days only (time availability) and rebuilds them from known fields", () => {
+    expect(readAvailabilityQuery({ days: [{ ...day(), trainer_id: "x", extra: 1 }] }, TODAY)).toEqual({ days: [day()] });
+    expect(readAvailabilityQuery({ industry_id: "nope", days: [day(), day({ date: "2026-11-21" })] }, TODAY)).toEqual({ days: [day(), day({ date: "2026-11-21" })] });
   });
   it.each<[string, unknown, RegExp]>([
     ["nothing", null, /at least one day/],
@@ -21,7 +19,6 @@ describe("reading the check", () => {
     ["a bad time", { days: [day(), day({ start: "16:00", end: "10:00" })] }, /Check the time for Day 2/],
     ["a time outside the slots", { days: [day({ start: "06:00", end: "08:00" })] }, /Morning \(9 AM – 5 PM\)/],
     ["a past date", { days: [day({ date: "2026-11-09" })] }, /Day 1: .*already passed/],
-    ["a bad industry", { industry_id: "nope", days: [day()] }, /industry/],
     ["junk", { days: [null] }, /Pick a date/],
   ])("refuses %s", (_, input, msg) => {
     expect(readAvailabilityQuery(input, TODAY)).toEqual({ error: expect.stringMatching(msg) });

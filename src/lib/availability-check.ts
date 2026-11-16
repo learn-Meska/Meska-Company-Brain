@@ -9,11 +9,9 @@ export type CheckDay = { date: string; start: string; end: string };
 // sameTrainer: whether one trainer could take every day; null when only one day was asked about.
 export type AvailabilityAnswer = { days: boolean[]; sameTrainer: boolean | null };
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// What the browser sent, rebuilt from known fields. The industry is optional (the checker works without one).
-export function readAvailabilityQuery(input: unknown, today: string): { days: CheckDay[]; industryId: string | null } | { error: string } {
-  const q = (input ?? {}) as { industry_id?: unknown; days?: unknown };
+// What the browser sent, rebuilt from known fields. Matching is on time only for now, so nothing else is read.
+export function readAvailabilityQuery(input: unknown, today: string): { days: CheckDay[] } | { error: string } {
+  const q = (input ?? {}) as { days?: unknown };
   if (!Array.isArray(q.days) || !q.days.length) return { error: "Add at least one day." };
   if (q.days.length > MAX_CHECK_DAYS) return { error: `Check at most ${MAX_CHECK_DAYS} days at a time.` };
   const days: CheckDay[] = [];
@@ -25,9 +23,7 @@ export function readAvailabilityQuery(input: unknown, today: string): { days: Ch
     if (day.date < today) return { error: `Day ${i + 1}: ${PAST_DATE}` };
     days.push({ date: day.date, start: day.start, end: day.end });
   }
-  const industry = q.industry_id == null || q.industry_id === "" ? null : String(q.industry_id);
-  if (industry && !UUID.test(industry)) return { error: "Pick the industry again." };
-  return { days, industryId: industry };
+  return { days };
 }
 
 // From the ids of the trainers free on each day, the only thing Growth is told.

@@ -221,13 +221,13 @@ describe("needs attention", () => {
 });
 
 describe("order and the Active / Past filter", () => {
-  it("attention first, then nearest date, then finished ones newest first", () => {
+  it("newest date first, whatever needs attention", () => {
     const soon = day({ date: "2026-11-20", program_name: "soon" });
     const urgent = day({ date: "2026-11-30", program_name: "urgent", status: "needs_trainer", trainer_id: null, trainer_responded_at: DONE });
     const far = day({ date: "2026-12-20", program_name: "far" });
     const oldest = day({ date: "2026-10-01", program_name: "oldest" });
     const recent = day({ date: "2026-11-05", program_name: "recent" });
-    expect(build([recent, far, oldest, soon, urgent]).map((r) => r.program)).toEqual(["urgent", "soon", "far", "recent", "oldest"]);
+    expect(build([recent, far, oldest, soon, urgent]).map((r) => r.program)).toEqual(["far", "urgent", "soon", "recent", "oldest"]);
   });
   it("every training has one status, so the status counts add up to the total", () => {
     const rows = build([day(), day({ status: "awaiting_trainer" }), day({ status: "needs_trainer", trainer_id: null }), day({ date: PAST }), day({ status: "cancelled" })]);

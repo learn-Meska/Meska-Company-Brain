@@ -126,14 +126,12 @@ export function needsAttention(days: Pick<CycleDay, "date" | "status" | "trainer
   return [...open, ...(contentOpen(content, days, today) ? days : [])].some((d) => d.date <= limit);
 }
 
-function compareTrainings(a: Training, b: Training) {
-  if (a.attention !== b.attention) return a.attention ? -1 : 1;
-  if (a.nextDate && b.nextDate) return a.nextDate.localeCompare(b.nextDate);
-  if (a.nextDate || b.nextDate) return a.nextDate ? -1 : 1;
-  return b.lastDate.localeCompare(a.lastDate);
+// Every dashboard lists the newest training date first; same date, the most recently requested first.
+export function compareTrainings(a: Training, b: Training) {
+  return b.firstDate.localeCompare(a.firstDate) || b.lastDate.localeCompare(a.lastDate) || b.requestedAt.localeCompare(a.requestedAt);
 }
 
-// One training = a deal, else a multi-day batch, else a single booking. Attention first, then the nearest date.
+// One training = a deal, else a multi-day batch, else a single booking. Newest date first.
 export function buildTrainings(input: {
   days: CycleDay[];
   deals: CycleDeal[];

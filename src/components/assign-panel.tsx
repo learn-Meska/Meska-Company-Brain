@@ -6,7 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import { assignTrainer, requestCandidates } from "@/app/(app)/bookings/actions";
 
 type Cand = { id: string; full_name: string; total: number; tier: { name: string; color: string } | null; feedback: number | null; delivered: number };
-type Day = { id: string; day_number: number; date: string; start: string; end: string; matches: Cand[]; otherFree: number };
+type Day = { id: string; day_number: number; date: string; start: string; end: string; matches: Cand[] };
 
 const fmt = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const t12 = (t: string) => {
@@ -113,17 +113,9 @@ export function AssignPanel({ bookingId, samePref }: { bookingId: string; samePr
               </div>
             ) : (
               <div className="rounded-xl bg-warn-bg px-3 py-2.5 text-sm text-warn">
-                <b>No trainer who fits this training is free at this time.</b>
+                <b>No trainer is free at this time.</b>
                 <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
-                  {d.otherFree > 0 && (
-                    <li>
-                      {d.otherFree} other {d.otherFree === 1 ? "trainer is" : "trainers are"} free then but {d.otherFree === 1 ? "doesn't" : "don't"} match the training&apos;s industry. To use one anyway, pick them in <b>Edit training</b> on{" "}
-                      <Link href={`/bookings/${d.id}`} className="underline">this day</Link>.
-                    </li>
-                  )}
-                  <li>
-                    Ask a trainer to add this slot to their availability; they show up here as soon as they do. <Link href="/find" className="underline">Find a trainer</Link> shows who fits.
-                  </li>
+                  <li>Ask a trainer to add this slot to their availability; they show up here as soon as they do.</li>
                   <li>Or agree another date or time with Growth and change it in Edit training.</li>
                 </ul>
               </div>

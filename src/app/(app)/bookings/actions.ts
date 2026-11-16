@@ -284,7 +284,7 @@ export async function createRequest(input: NewRequest) {
 
 /* ---------- Assign a trainer to a request ---------- */
 
-// Free, matching trainers for every day of a request (and, for multi-day requests, those free on all days).
+// Free trainers for every day of a request (time availability only for now) (and, for multi-day requests, those free on all days).
 export async function requestCandidates(bookingId: string) {
   await requireAccess("te.assign");
   const [b] = await loadBookings([bookingId]);
@@ -292,9 +292,9 @@ export async function requestCandidates(bookingId: string) {
   // Days that already went by can't be assigned, so a training reassigned partway only asks for the days left.
   const days = b.batch_id ? (await loadBatch(b.batch_id)).filter((d) => d.status === "needs_trainer" && d.date >= todayISO()) : [b];
   const lists = await Promise.all(
-    days.map((d) => searchTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5), audienceId: d.audience_id ?? "", functionId: d.function_id ?? "", industryId: d.industry_id ?? "", skillIds: d.skill_ids })),
+    days.map((d) => assignableTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5) })),
   );
-  const slim = (t: Awaited<ReturnType<typeof searchTrainers>>["matches"][number]) => ({
+  const slim = (t: Awaited<ReturnType<typeof assignableTrainers>>[number]) => ({
     id: t.id,
     full_name: t.full_name,
     total: t.total,
@@ -302,11 +302,9 @@ export async function requestCandidates(bookingId: string) {
     feedback: t.feedback.average,
     delivered: t.delivered,
   });
-  const perDay = lists.map((l) => l.matches.map(slim));
+  const perDay = lists.map((l) => l.map(slim));
   const common = perDay.length > 1 ? perDay[0].filter((t) => perDay.every((list) => list.some((x) => x.id === t.id))) : [];
-  // otherFree: trainers free at that time who don't fit the request (e.g. another industry). They can't be
-  // assigned here, but the booking team can still pick one from Edit training if it decides to.
-  return { days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, start: d.start_time, end: d.end_time, matches: perDay[i], otherFree: lists[i].unavailableCount })), common };
+  return { days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, start: d.start_time, end: d.end_time, matches: perDay[i] })), common };
 }
 
 async function loadBatch(batchId: string) {
@@ -503,7 +501,7 @@ export async function editAvailability(bookingId: string, input: { date: string;
   const when = { date: input.date, start: input.start, end: input.end };
   const [free, others] = await Promise.all([
     b.trainer_id ? searchTrainers({ ...when, audienceId: "", functionId: "", industryId: "", skillIds: [], excludeBookingId: b.id }) : null,
-    assignableTrainers(when, b.industry_id, b.id),
+    assignableTrainers(when, b.id),
   ]);
   return {
     // null when the day has no trainer yet

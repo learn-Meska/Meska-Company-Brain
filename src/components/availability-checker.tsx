@@ -7,7 +7,6 @@ import { AvailabilityChip } from "@/components/availability-chip";
 import { CalendarIcon, PlusIcon } from "@/components/icons";
 import { daysToParam, MAX_CHECK_DAYS } from "@/lib/availability-check";
 
-type Opt = { id: string; name: string };
 type Day = { key: number; date: string; start: string; end: string };
 
 const PRESETS = [
@@ -23,19 +22,18 @@ function addDays(d: string, n: number) {
 }
 
 // Growth's availability check without a deal: dates in, "a trainer is available" or not out.
-export function AvailabilityChecker({ industries, today, canStartDeal }: { industries: Opt[]; today: string; canStartDeal: boolean }) {
-  const [industry, setIndustry] = useState("");
+export function AvailabilityChecker({ today, canStartDeal }: { today: string; canStartDeal: boolean }) {
   const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00" }]);
   const [result, setResult] = useState<{ query: string; days: boolean[] | null; sameTrainer: boolean | null; error: string }>({ query: "", days: null, sameTrainer: null, error: "" });
   const patch = (key: number, p: Partial<Day>) => setDays((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d)));
 
   const ready = days.every((d) => d.date && d.start && d.end);
-  const query = ready ? JSON.stringify([industry, days.map((d) => [d.date, d.start, d.end])]) : "";
+  const query = ready ? JSON.stringify(days.map((d) => [d.date, d.start, d.end])) : "";
   useEffect(() => {
     if (!query) return;
     let live = true;
     const t = setTimeout(async () => {
-      const r = await checkAvailability({ industry_id: industry || null, days: days.map((d) => ({ date: d.date, start: d.start, end: d.end })) }).catch(() => ({ error: "Couldn't check availability. Check your connection and try again." }));
+      const r = await checkAvailability({ days: days.map((d) => ({ date: d.date, start: d.start, end: d.end })) }).catch(() => ({ error: "Couldn't check availability. Check your connection and try again." }));
       if (!live) return;
       setResult("days" in r ? { query, days: r.days, sameTrainer: r.sameTrainer, error: "" } : { query, days: null, sameTrainer: null, error: r.error ?? "" });
     }, 350);
@@ -47,7 +45,7 @@ export function AvailabilityChecker({ industries, today, canStartDeal }: { indus
   }, [query]);
   const answer = result.query === query ? result : null;
   const yes = answer?.days?.filter(Boolean).length ?? 0;
-  const dealHref = `/request?days=${encodeURIComponent(daysToParam(days))}${industry ? `&industry=${industry}` : ""}`;
+  const dealHref = `/request?days=${encodeURIComponent(daysToParam(days))}`;
 
   function addDay() {
     const last = days[days.length - 1];
@@ -58,20 +56,9 @@ export function AvailabilityChecker({ industries, today, canStartDeal }: { indus
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
       <section className="ds-card relative overflow-hidden p-5 sm:p-6">
         <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-ds-primary" />
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-ds-heading">Training days</h2>
-            <p className="text-sm text-ds-text">Add each day and its time. The answer updates as you type.</p>
-          </div>
-          <div className="w-full sm:w-64">
-            <label className="label" htmlFor="av-industry">Client industry <span className="font-normal normal-case text-faint">(optional)</span></label>
-            <select id="av-industry" className="input" value={industry} onChange={(e) => setIndustry(e.target.value)}>
-              <option value="">Any industry</option>
-              {industries.map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-          </div>
+        <div>
+          <h2 className="text-lg font-semibold text-ds-heading">Training days</h2>
+          <p className="text-sm text-ds-text">Add each day and its time. The answer updates as you type.</p>
         </div>
 
         <ol className="mt-5 space-y-3">

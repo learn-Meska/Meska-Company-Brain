@@ -91,7 +91,7 @@ export function RequestBuilder({
   const patch = (key: number, p: Partial<Day>) => setDays((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d)));
 
   const ready = days.every((d) => d.date && d.start && d.end);
-  const query = ready ? JSON.stringify([canAssign ? "" : f.industry_id, days.map((d) => [d.date, d.start, d.end])]) : "";
+  const query = ready ? JSON.stringify(days.map((d) => [d.date, d.start, d.end])) : "";
   // Booking team: the trainers free on each day. Growth: only whether a trainer is available on each day.
   const [options, setOptions] = useState<{ query: string; days: TrainerOpt[][] | null; error: string }>({ query: "", days: null, error: "" });
   const [avail, setAvail] = useState<{ query: string; days: boolean[] | null; sameTrainer: boolean | null; error: string }>({ query: "", days: null, sameTrainer: null, error: "" });
@@ -107,7 +107,7 @@ export function RequestBuilder({
         // drop a pick that no longer fits
         if (list) setDays((ds) => ds.map((d, i) => (d.trainerId && !list[i]?.some((x) => x.id === d.trainerId) ? { ...d, trainerId: "" } : d)));
       } else {
-        const r = await checkAvailability({ industry_id: f.industry_id || null, days: days.map((d) => ({ date: d.date, start: d.start, end: d.end })) }).catch(() => ({ error: "Couldn't check availability. Check your connection." }));
+        const r = await checkAvailability({ days: days.map((d) => ({ date: d.date, start: d.start, end: d.end })) }).catch(() => ({ error: "Couldn't check availability. Check your connection." }));
         if (!live) return;
         setAvail("days" in r ? { query, days: r.days, sameTrainer: r.sameTrainer, error: "" } : { query, days: null, sameTrainer: null, error: r.error ?? "" });
       }
