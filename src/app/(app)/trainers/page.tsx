@@ -6,7 +6,7 @@ import { canManageTrainers, requireAccess } from "@/lib/auth";
 import { getTrainerProfiles } from "@/lib/scoring";
 
 export default async function TrainersPage() {
-  const me = await requireAccess("growth.trainers", "te.trainers", "te.find", "te.assign");
+  const me = await requireAccess("te.trainers", "te.find", "te.assign");
   const trainers = (await getTrainerProfiles()).sort((a, b) => b.total - a.total);
   return (
     <div className="space-y-6">

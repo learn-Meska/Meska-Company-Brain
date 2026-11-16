@@ -18,9 +18,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (u.role === "growth") items.push({ href: "/availability", label: "Check availability" });
     if (u.role === "approver" && has("te.assign") && !has("te.dashboard")) items.push({ href: "/request", label: "Request a training" });
     if (has("te.find")) items.push({ href: "/find", label: "Find a trainer" });
-    if (has("te.find") || has("te.dashboard") || has("growth.calendar")) items.push({ href: "/calendar", label: "Calendar" });
+    // Growth has no calendar or trainer list: it checks availability and follows its own deals.
+    if (has("te.find") || has("te.dashboard")) items.push({ href: "/calendar", label: "Calendar" });
     if (u.role === "growth") items.push({ href: "/bookings", label: { all: "All bookings", team: "Team bookings", own: "My bookings" }[dealScope(u)] });
-    if (has("growth.trainers") || has("te.trainers") || has("te.find") || has("te.assign")) items.push({ href: "/trainers", label: "Trainers" });
+    if (has("te.trainers") || has("te.find") || has("te.assign")) items.push({ href: "/trainers", label: "Trainers" });
     if (has("content.view")) items.push({ href: "/content", label: "Content requests" });
     if (canEditSettings(u)) items.push({ href: "/admin/feedback-form", label: "Feedback form" });
     if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });

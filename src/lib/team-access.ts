@@ -29,8 +29,6 @@ export const ACCESS: Record<Team, AccessDef[]> = {
   ],
   growth: [
     { key: "growth.new_deal", label: "Send new deals", hint: "Use New deal, and edit or cancel their own requests" },
-    { key: "growth.trainers", label: "Browse trainers", hint: "View trainer profiles and download PDFs" },
-    { key: "growth.calendar", label: "Calendar", hint: "See the training calendar" },
     { key: "growth.deal_value", label: "See deal value", hint: "Value and training outline on deals" },
     { key: "growth.emails", label: "Get emails", hint: "Emails about trainings they're on" },
   ],
