@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { AutoSelect } from "@/components/auto-select";
 import { requireAccess } from "@/lib/auth";
-import { buildTrainings, isContentFilter, type ContentState, type CycleDay, type CycleDeal, type Training } from "@/lib/cycle";
+import { buildTrainings, compareTrainings, isContentFilter, type ContentState, type CycleDay, type CycleDeal, type Training } from "@/lib/cycle";
 import { fmtDate, fmtTime, isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
 import { CONTENT_STYLE } from "../dashboard/styles";
@@ -61,7 +61,7 @@ export default async function ContentPage({ searchParams }: PageProps<"/content"
     today,
   })
     .filter((t) => t.content !== "none" && t.stage !== "cancelled")
-    .sort((a, b) => Number(a.content === "submitted") - Number(b.content === "submitted") || a.firstDate.localeCompare(b.firstDate));
+    .sort(compareTrainings);
 
   const startsSoon = (t: Training) => t.content !== "submitted" && t.firstDate >= today && t.firstDate <= soonEnd;
 

@@ -15,14 +15,15 @@ export default async function MyBookingsPage({ searchParams }: PageProps<"/me/bo
     .select(BOOKING_SELECT)
     .eq("trainer_id", me.trainer_id ?? "")
     .in("status", ["awaiting_trainer", "confirmed", "cancelled"])
-    .order("date");
+    .order("date", { ascending: false })
+    .order("start_time", { ascending: false });
   const rows = (data ?? []) as BookingRow[];
   const today = todayISO();
   // Days that need the trainer now come first: a session that started and isn't marked as delivered, or an
   // assignment whose date passed without an answer. They would otherwise sink into "Past".
   const due = rows.filter((b) => deliveryState(b) === "ready" || (b.status === "awaiting_trainer" && b.date < today));
   const upcoming = rows.filter((b) => !due.includes(b) && b.date >= today && b.status !== "cancelled");
-  const other = rows.filter((b) => !due.includes(b) && !upcoming.includes(b)).reverse();
+  const other = rows.filter((b) => !due.includes(b) && !upcoming.includes(b));
   const Item = ({ b }: { b: BookingRow }) => {
     const state = deliveryState(b);
     return (

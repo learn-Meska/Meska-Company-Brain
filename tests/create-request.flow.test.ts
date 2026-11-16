@@ -222,7 +222,7 @@ describe("New deal: helpers around the form", () => {
       { date: "2026-11-10", start: "10:00", end: "15:00" },
       { date: "2026-11-11", start: "10:00", end: "15:00" },
     ];
-    const yes = await checkAvailability({ industry_id: INDUSTRY, days });
+    const yes = await checkAvailability({ days });
     expect(yes).toEqual({ days: [true, true], sameTrainer: true });
     expect(JSON.stringify(yes)).not.toMatch(/Trainer One|AI coach|3333/);
     h.free = [];

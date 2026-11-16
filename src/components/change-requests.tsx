@@ -26,7 +26,7 @@ const HOW: Record<ChangeKind, string> = {
 // For a "different trainer" request: how many other trainers Training Excellence could assign to each upcoming day.
 async function alternatives(data: TrainingChangeRequests, today: string) {
   const days = openDays(data.days, today).filter((d) => d.trainer_id);
-  const lists = await Promise.all(days.map((d) => assignableTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5) }, d.industry_id, d.id)));
+  const lists = await Promise.all(days.map((d) => assignableTrainers({ date: d.date, start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5) }, d.id)));
   const others = lists.map((l, i) => l.filter((t) => t.id !== days[i].trainer_id).map((t) => t.id));
   return {
     days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, count: others[i].length })),

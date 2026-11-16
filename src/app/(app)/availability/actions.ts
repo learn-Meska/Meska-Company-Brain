@@ -11,5 +11,5 @@ export async function checkAvailability(input: unknown) {
   await requireRole("admin", "approver", "growth");
   const q = readAvailabilityQuery(input, todayISO());
   if ("error" in q) return { error: q.error };
-  return availabilityFor(q.days, q.industryId);
+  return availabilityFor(q.days);
 }
