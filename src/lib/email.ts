@@ -16,7 +16,14 @@ function mailer() {
   return transport;
 }
 
-export const siteUrl = () => (process.env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
+// Builds every link in emails. A SITE_URL pointing at the Vercel dashboard (vercel.com/<team>) instead of the
+// app sends people to a 404, so it is ignored in favour of the deployment's own production address.
+export function siteUrl() {
+  const set = (process.env.SITE_URL ?? "").trim().replace(/\/$/, "");
+  if (set && !/^https?:\/\/(www\.)?vercel\.com(\/|$)/i.test(set)) return set;
+  const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  return prod ? `https://${prod.replace(/\/$/, "")}` : "http://localhost:3000";
+}
 
 export type Attachment = { filename: string; content: string | Buffer; contentType: string };
 
