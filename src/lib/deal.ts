@@ -44,6 +44,15 @@ export function clashingDays(days: { day_number: number; date: string; start: st
   return null;
 }
 
+// The first two days of a deal on the same date. A deal never has two training days on one date.
+export function sameDateDays(days: { day_number: number; date: string }[]): [number, number] | null {
+  for (let i = 0; i < days.length; i++) {
+    for (let j = i + 1; j < days.length; j++) if (days[i].date && days[i].date === days[j].date) return [days[i].day_number, days[j].day_number];
+  }
+  return null;
+}
+export const sameDateError = (pair: [number, number]) => `Day ${pair[0]} and Day ${pair[1]} are on the same date. Each training day needs its own date.`;
+
 /* ---------- Participants (the audience, uploaded as a CSV) ---------- */
 
 export type Participant = { name: string; title: string; department: string };
@@ -245,6 +254,8 @@ export function requestError(input: NewRequest, who: { canAssign: boolean; userI
     if (d.trainer_id && !UUID.test(d.trainer_id)) return `Day ${d.day_number}: pick the trainer again.`;
     if (typeof d.location !== "string") return `Check the location for Day ${d.day_number}.`;
   }
+  const dup = sameDateDays(input.days);
+  if (dup) return sameDateError(dup);
   // Growth never chooses the trainer: every day goes to Training Excellence, who assign one.
   const picked = input.days.find((d) => d.trainer_id);
   if (!who.canAssign && picked) return `Training Excellence assigns the trainer. Send Day ${picked.day_number} without one.`;

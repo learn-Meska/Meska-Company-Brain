@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   clashingDays,
+  sameDateDays,
   contactError,
   dayError,
   dealTotal,
@@ -177,15 +178,17 @@ describe("requestError: the whole New deal, step by step", () => {
     // other dates don't look at the clock
     expect(requestError(validRequest(), { ...growth, nowTime: "23:00" })).toBeNull();
   });
-  it("same trainer for all days can't hold when two days share a date and slot", () => {
+  it("a deal never has two days on the same date", () => {
     const day = validRequest().days[0];
     const two = [day, { ...day, day_number: 2, start: "11:00", end: "16:00" }];
     expect(clashingDays(two)).toEqual([1, 2]);
     expect(clashingDays([day, { ...day, day_number: 2, start: "18:00", end: "22:00" }])).toBeNull();
     expect(clashingDays([day, { ...day, day_number: 2, date: "2026-11-11" }])).toBeNull();
-    expect(requestError(validRequest({ deal_days: 2, days: two, same_trainer: true }), growth)).toMatch(/Day 1 and Day 2 are at the same time/);
-    // two groups on the same morning with different trainers is a valid deal
-    expect(requestError(validRequest({ deal_days: 2, days: two, same_trainer: false }), growth)).toBeNull();
+    expect(sameDateDays(two)).toEqual([1, 2]);
+    expect(sameDateDays([day, { ...day, day_number: 2, date: "2026-11-11" }])).toBeNull();
+    // same date is refused whatever the time or the same-trainer choice, morning and evening included
+    for (const same_trainer of [true, false]) expect(requestError(validRequest({ deal_days: 2, days: two, same_trainer }), growth)).toBe("Day 1 and Day 2 are on the same date. Each training day needs its own date.");
+    expect(requestError(validRequest({ days: [day, { ...day, day_number: 2, start: "18:00", end: "22:00" }] }), growth)).toMatch(/same date/);
   });
   it.each<[string, Partial<NewRequest>, RegExp]>([
     ["company name", { company_name: "  " }, /company name/],
@@ -207,7 +210,7 @@ describe("requestError: the whole New deal, step by step", () => {
   });
   it("the days added don't have to equal the days in the training outline", () => {
     const day = validRequest().days[0];
-    const three = [day, { ...day, day_number: 2 }, { ...day, day_number: 3 }];
+    const three = [day, { ...day, day_number: 2, date: "2026-11-21" }, { ...day, day_number: 3, date: "2026-11-22" }];
     expect(requestError(validRequest({ deal_days: 3, days: three }), growth)).toBeNull();
     expect(requestError(validRequest({ deal_days: 3, days: three.slice(0, 1) }), growth)).toBeNull();
     expect(requestError(validRequest({ deal_days: 2, days: three }), growth)).toBeNull();

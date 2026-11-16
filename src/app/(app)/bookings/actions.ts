@@ -545,6 +545,13 @@ export async function editBooking(fd: FormData) {
   if (!DATE.test(next.date) || !TIME.test(next.start_time) || !TIME.test(next.end_time) || next.end_time <= next.start_time) return { error: "Check the date and time." };
   if (!slotsFor(next.start_time, next.end_time).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
   if (next.date !== b.date && next.date < todayISO()) return { error: PAST_DATE };
+  // A deal (or multi-day training) never has two days on the same date.
+  if (next.date !== b.date && (b.deal_id || b.batch_id)) {
+    const q = db().from("bookings").select("day_number").neq("id", b.id).neq("status", "cancelled").eq("date", next.date);
+    const { data: other } = await (b.deal_id ? q.eq("deal_id", b.deal_id) : q.eq("batch_id", b.batch_id!)).limit(1);
+    const o = (other ?? [])[0] as { day_number: number } | undefined;
+    if (o) return { error: `Day ${o.day_number} of this training is already on that date. Each training day needs its own date.` };
+  }
 
   // The trainer, for the booking team: "keep" (or nothing sent) keeps the current one, "none" leaves the day to
   // assign later, an id picks a trainer who must be free at the new date and time.
