@@ -88,7 +88,7 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
               b={{ id: b.id, program_name: b.program_name, day_number: b.day_number, date: b.date, start: b.start_time.slice(0, 5), end: b.end_time.slice(0, 5), location: b.location ?? "", content: b.content }}
               current={b.trainer_id && b.trainers ? { id: b.trainer_id, name: b.trainers.full_name } : null}
               pickTrainer={can(me, "te.edit")}
-              canViewProfiles={can(me, "growth.trainers") || can(me, "te.trainers") || can(me, "te.find") || can(me, "te.assign")}
+              canViewProfiles={can(me, "te.trainers") || can(me, "te.find") || can(me, "te.assign")}
             />
           </section>
           )}

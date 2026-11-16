@@ -6,7 +6,7 @@ import { todayISO } from "@/lib/format";
 import { growthOwnerIds } from "@/lib/team-people";
 
 export default async function CalendarPage({ searchParams }: PageProps<"/calendar">) {
-  const me = await requireAccess("growth.calendar", "te.find", "te.dashboard");
+  const me = await requireAccess("te.find", "te.dashboard");
   const { m, trainer } = await searchParams;
   const grid = monthGrid(m);
   let q = db()

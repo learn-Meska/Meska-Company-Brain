@@ -5,7 +5,7 @@ import { canManageTrainers, requireAccess } from "@/lib/auth";
 import { getTrainerProfiles } from "@/lib/scoring";
 
 export default async function TrainerPage({ params }: PageProps<"/trainers/[id]">) {
-  const me = await requireAccess("growth.trainers", "te.trainers", "te.find", "te.assign");
+  const me = await requireAccess("te.trainers", "te.find", "te.assign");
   const { id } = await params;
   const [t] = await getTrainerProfiles([id]);
   if (!t) notFound();

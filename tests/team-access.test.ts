@@ -19,7 +19,7 @@ import {
 } from "../src/lib/team-access";
 
 const growthLead = { id: "lead", role: "growth", real_role: "growth", team_admin_of: ["growth"], permissions: [] };
-const growthMember = { id: "m1", role: "growth", real_role: "growth", team_admin_of: [], permissions: ["growth.trainers"] };
+const growthMember = { id: "m1", role: "growth", real_role: "growth", team_admin_of: [], permissions: ["growth.deal_value"] };
 const companyAdmin = { id: "boss", role: "admin", real_role: "admin", team_admin_of: [], permissions: [] };
 
 describe("portal accesses", () => {
@@ -31,7 +31,7 @@ describe("portal accesses", () => {
   });
 
   it("a member has only the accesses ticked; a portal admin has all of their portal", () => {
-    expect(hasAccess(growthMember, "growth.trainers")).toBe(true);
+    expect(hasAccess(growthMember, "growth.deal_value")).toBe(true);
     expect(hasAccess(growthMember, "growth.new_deal")).toBe(false);
     expect(hasAccess(growthLead, "growth.new_deal")).toBe(true);
     // never another portal's access, even as its admin
@@ -53,7 +53,7 @@ describe("portal accesses", () => {
 
   it("cleans accesses to known keys of portals the person is in", () => {
     expect(cleanPermissions(["growth"], ["growth.new_deal", "te.assign", "made.up"])).toEqual(["growth.new_deal"]);
-    expect(withPortalAccess(["te.assign", "growth.calendar"], "growth", ["growth.new_deal", "te.find"])).toEqual(["te.assign", "growth.new_deal"]);
+    expect(withPortalAccess(["te.assign", "growth.deal_value"], "growth", ["growth.new_deal", "te.find"])).toEqual(["te.assign", "growth.new_deal"]);
   });
 
   it("emails go to members with Get emails, and to portal admins", () => {
@@ -74,8 +74,8 @@ describe("portal accesses", () => {
 
 describe("categories", () => {
   it("putting someone in a category sets only that category's accesses", () => {
-    const cur = { roles: ["growth"], team_admin_of: [], permissions: ["growth.calendar"] };
-    expect(applyCategory(cur, "content", ["content.view", "growth.new_deal"], false)).toEqual({ roles: ["growth", "content"], team_admin_of: [], team_leader_of: [], reports_to: {}, permissions: ["growth.calendar", "content.view"] });
+    const cur = { roles: ["growth"], team_admin_of: [], permissions: ["growth.deal_value"] };
+    expect(applyCategory(cur, "content", ["content.view", "growth.new_deal"], false)).toEqual({ roles: ["growth", "content"], team_admin_of: [], team_leader_of: [], reports_to: {}, permissions: ["growth.deal_value", "content.view"] });
     expect(applyCategory(cur, "growth", ["growth.new_deal"], false).permissions).toEqual(["growth.new_deal"]);
   });
 
@@ -222,7 +222,7 @@ describe("three layers: portal admin, team leader, member", () => {
     const asAdmin = applyCategory(promoted, "growth", [], "admin");
     expect(asAdmin).toMatchObject({ team_admin_of: ["growth"], team_leader_of: [], reports_to: {} });
     // saving a member's accesses without naming a leader keeps the one they had
-    expect(applyCategory(member, "growth", ["growth.calendar"], "member").reports_to).toEqual({ growth: "l" });
+    expect(applyCategory(member, "growth", ["growth.deal_value"], "member").reports_to).toEqual({ growth: "l" });
     // leaving the portal drops the leader too
     expect(dropCategory(member, "growth")).toMatchObject({ roles: [], reports_to: {} });
   });
