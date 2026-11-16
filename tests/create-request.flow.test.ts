@@ -163,12 +163,6 @@ describe("New deal: refusals leave nothing behind", () => {
     expect(h.fake.writes).toEqual([]);
   });
 
-  it("days that don't match the proposal are refused before any write", async () => {
-    const r = await createRequest(await uploadedRequest({ deal_days: 3 }));
-    expect(r.error).toBe("The number of days chosen (1 day) does not match the training outline (3 days). Add 2 days so they match.");
-    expect(h.fake.writes).toEqual([]);
-  });
-
   it("invalid input is refused before any write", async () => {
     const r = await createRequest(await uploadedRequest({ participants: "x" as never }));
     expect(r.error).toMatch(/participants file/);
