@@ -10,6 +10,7 @@ import { createProposalUpload, createRequest, requestTrainerOptions } from "@/ap
 import type { CheckDay } from "@/lib/availability-check";
 import {
   clashingDays,
+  sameDateDays,
   dealTotal,
   dealValueError,
   fmtAmount,
@@ -120,6 +121,7 @@ export function RequestBuilder({
   const common = opts && opts.length > 1 ? opts[0].filter((t) => opts.every((l) => l.some((x) => x.id === t.id))) : [];
   const sameId = same && days.length > 1 && days.every((d) => d.trainerId === days[0].trainerId) ? days[0].trainerId : "";
   const free = avail.query === query ? avail : null;
+  const dupDate = sameDateDays(days.map((d, i) => ({ day_number: i + 1, date: d.date })));
   const clash = same && ready ? clashingDays(days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end }))) : null;
 
   function addDay() {
@@ -162,6 +164,7 @@ export function RequestBuilder({
     // A file that couldn't be read is never sent silently as "no audience".
     if (people?.error) return setErr("The participants file has a problem (step 2). Fix it, or remove it to send the deal without an audience.");
     if (!proposal) return setErr("Upload the training outline (step 3).");
+    if (dupDate) return setErr(`Day ${dupDate[0]} and Day ${dupDate[1]} are on the same date. Each training day needs its own date (step 4).`);
     start(async () => {
       const r = await createRequest({
         ...f,
@@ -328,7 +331,8 @@ export function RequestBuilder({
             <div className="grid gap-3 sm:grid-cols-[160px_120px_120px_1fr]">
               <div>
                 <label className="label" htmlFor={`d${d.key}`}>Date *</label>
-                <input id={`d${d.key}`} type="date" min={today} className="input" value={d.date} onChange={(e) => patch(d.key, { date: e.target.value })} />
+                <input id={`d${d.key}`} type="date" min={today} className={`input ${dupDate && dupDate[1] === i + 1 ? "border-bad" : ""}`} value={d.date} onChange={(e) => patch(d.key, { date: e.target.value })} />
+                {dupDate && dupDate[1] === i + 1 && <p className="mt-1 text-xs text-bad">Same date as Day {dupDate[0]}. Pick another date.</p>}
               </div>
               <div>
                 <label className="label" htmlFor={`s${d.key}`}>From</label>
