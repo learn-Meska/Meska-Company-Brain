@@ -20,6 +20,7 @@ import { FEEDBACK_SOURCE_LABEL, FEEDBACK_TEAM_LABEL, mayDeleteFeedback, RATING_L
 import { seesDealOf } from "@/lib/team-people";
 import { settleChangeRequests } from "@/lib/change-requests";
 import {
+  renumberByDate,
   contactError,
   contactFields,
   DATE,
@@ -313,7 +314,7 @@ export async function assignTrainer(assignments: { bookingId: string; trainerId:
     await emailAssignment(b);
   }
   const names = [...new Set(rows.map((b) => b.trainers?.full_name))].join(", ");
-  await notify(await trainingTeam(rows[0], me.id), {
+  await notify(await trainingTeam(rows[0], me), {
     title: `${me.full_name} assigned ${names} to ${rows[0].program_name}`,
     body: rows.map((b) => `Day ${b.day_number}: ${b.trainers?.full_name}`).join(" · "),
     link: `/bookings/${rows[0].id}`,
@@ -381,7 +382,7 @@ export async function respondBooking(id: string, accept: boolean, comment: strin
   await audit(me.id, accept ? "booking_confirmed" : "booking_declined", id, { comment, program: title(b) });
   // Everyone on the training hears the answer: Training Excellence, admins, the Growth requester and the content team.
   const status = accept ? "confirmed" : "needs_trainer";
-  await notify(await trainingTeam(b, me.id), {
+  await notify(await trainingTeam(b, me), {
     title: accept ? `${me.full_name} confirmed ${title(b)}` : `${me.full_name} declined ${title(b)} — trainer needed`,
     body: accept ? when(b) : `Reason: ${comment.trim()}. It's back to “Needs a trainer”.`,
     link: `/bookings/${id}`,
@@ -531,17 +532,15 @@ export async function editBooking(fd: FormData) {
   const [b] = await loadBookings([id]);
   if (!b || !mayChange(me, b, "te.edit")) return { error: "Booking not found." };
   if (!ACTIVE.includes(b.status)) return { error: "Only active bookings can be edited." };
+  // Editing a day changes its date, time and location (and, for older requests without a deal, its content).
+  // The program name belongs to the whole training and the day number follows the dates, so neither is typed here.
   const next = {
-    program_name: String(fd.get("program_name") ?? "").trim(),
-    day_number: Number(fd.get("day_number")),
     date: String(fd.get("date")),
     start_time: String(fd.get("start")),
     end_time: String(fd.get("end")),
     location: String(fd.get("location") ?? "").trim() || null,
-    content: String(fd.get("content") ?? "").replace(/\r\n/g, "\n").trim(),
+    content: b.deal_id || !fd.has("content") ? b.content : String(fd.get("content") ?? "").replace(/\r\n/g, "\n").trim(),
   };
-  if (!next.program_name) return { error: "The program name can't be empty." };
-  if (!Number.isInteger(next.day_number) || next.day_number < 1) return { error: "The day number must be 1 or more." };
   if (!DATE.test(next.date) || !TIME.test(next.start_time) || !TIME.test(next.end_time) || next.end_time <= next.start_time) return { error: "Check the date and time." };
   if (!slotsFor(next.start_time, next.end_time).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
   if (next.date !== b.date && next.date < todayISO()) return { error: PAST_DATE };
@@ -586,8 +585,6 @@ export async function editBooking(fd: FormData) {
   const trainerChanged = trainerId !== b.trainer_id;
 
   const fields: [string, string, string][] = [
-    ["Program", b.program_name, next.program_name],
-    ["Day", String(b.day_number), String(next.day_number)],
     ["Date", fmtDate(b.date), fmtDate(next.date)],
     ["Time", `${fmtTime(b.start_time)} – ${fmtTime(b.end_time)}`, `${fmtTime(next.start_time)} – ${fmtTime(next.end_time)}`],
     ["Location", b.location ?? "—", next.location ?? "—"],
@@ -618,6 +615,13 @@ export async function editBooking(fd: FormData) {
   const { data: saved, error } = await q.select("id");
   if (error) return { error: friendlyError(error.message) };
   if (!saved?.length) return { error: "This booking changed while you were editing. Refresh the page and try again." };
+  // Day 1 is always the earliest day: a day moved before or after another one swaps numbers with it.
+  if (timeChanged && (b.deal_id || b.batch_id)) {
+    const g = db().from("bookings").select("id, date, start_time, day_number");
+    const { data: group } = await (b.deal_id ? g.eq("deal_id", b.deal_id) : g.eq("batch_id", b.batch_id!));
+    for (const r of renumberByDate((group ?? []) as { id: string; date: string; start_time: string; day_number: number }[]))
+      await db().from("bookings").update({ day_number: r.day_number }).eq("id", r.id);
+  }
   await audit(me.id, "booking_edited", id, { changes, program: title(b) });
   if (trainerChanged) {
     if (b.trainer_id) await audit(me.id, "trainer_removed", id, { program: title(b), trainer: b.trainers?.full_name });
@@ -625,6 +629,8 @@ export async function editBooking(fd: FormData) {
   }
   const [fresh] = await loadBookings([id]);
   if (!fresh) return { ok: "Saved." };
+  const renumbered = fresh.day_number !== b.day_number;
+  if (renumbered) changes.push({ field: "Day number", from: `Day ${b.day_number}`, to: `Day ${fresh.day_number} (days follow the dates)` });
 
   // The previous trainer is told they're off it (the invite is withdrawn from their calendar).
   if (trainerChanged && b.trainer_id) await emailTrainerRemoved(b, me.full_name);
@@ -667,15 +673,21 @@ export async function editBooking(fd: FormData) {
           : fresh.trainer_id
             ? [`<b>${trainerName}</b> was told about the change. Nothing else is needed.`]
             : ["This day still needs a trainer. Training Excellence will assign one."];
-  await notify(await trainingTeam(fresh, me.id), {
-    title: `Training updated: ${title(fresh)}`,
+  // Training Excellence must act when the day lost its trainer; the subject says so first.
+  const needsTrainer = trainerChanged && !fresh.trainer_id;
+  // "Trainer needed" already says the trainer came off, so the list names what was edited.
+  const what = changes.filter((c) => c.field !== "Day number" && !(needsTrainer && c.field === "Trainer")).map((c) => c.field.toLowerCase()).join(", ") || "details";
+  const dayName = `${fresh.program_name} — Day ${fresh.day_number} (${fmtDate(fresh.date, { weekday: "short", day: "numeric", month: "short" })})`;
+  const byGrowth = me.role === "growth";
+  await notify(await trainingTeam(fresh, me), {
+    title: `${needsTrainer ? "Trainer needed — " : ""}${byGrowth ? "Growth changed" : "Changed"} ${what}: ${dayName}`,
     body: summary,
     link: `/bookings/${id}`,
     email: {
-      subject: `Training updated (${changes.map((c) => c.field.toLowerCase()).join(", ")}): ${title(fresh)}`,
-      heading: trainerChanged ? "The trainer of a training changed" : "A training was changed",
+      subject: `${needsTrainer ? "Action needed: assign a trainer — " : ""}${byGrowth ? "Growth changed the" : "Changed the"} ${what} of ${dayName}`,
+      heading: needsTrainer ? "A training day needs a new trainer" : trainerChanged ? "The trainer of a training day changed" : byGrowth ? "Growth changed a training day" : "A training day was changed",
       step: stepFor(fresh),
-      intro: `<b>${esc(me.full_name)}</b> changed ${changes.length === 1 ? "one detail" : `${changes.length} details`} of <b>${esc(title(fresh))}</b>. The table shows each change, before and now.`,
+      intro: `<b>${esc(me.full_name)}</b>${byGrowth ? " (Growth)" : ""} changed ${changes.length === 1 ? "one detail" : `${changes.length} details`} of <b>${esc(dayName)}</b>. The table shows each change, before and now.${renumbered ? ` The days of this training are numbered in date order, so this day is now <b>Day ${fresh.day_number}</b>.` : ""}`,
       extra: changeTable(changes),
       rows: bookingRows(fresh),
       next: teamNext,
@@ -724,7 +736,7 @@ export async function updateContact(fd: FormData) {
   if (error) return { error: friendlyError(error.message) };
   await audit(me.id, "client_contact_updated", id, { program: b.program_name, contact: contactFields(c) });
   const contactLine = `${esc(c.name.trim())} · ${esc(c.email.trim())} · ${esc(c.mobile.trim())}`;
-  await notify(await trainingTeam(b, me.id), {
+  await notify(await trainingTeam(b, me), {
     title: `Client contact updated: ${b.program_name}`,
     body: `${c.name.trim()} · ${c.email.trim()} · ${c.mobile.trim()}`,
     link: `/bookings/${id}`,
@@ -758,7 +770,7 @@ export async function cancelBooking(fd: FormData) {
   return { ok: "Cancelled. The trainer and the team were notified, and the reason is in the activity log." };
 }
 
-type Canceller = { id: string; full_name: string };
+type Canceller = { id: string; full_name: string; role: string };
 type CancelledDay = { b: BookingRow; reason: string; shortNotice: boolean };
 
 // Cancels one day and tells its trainer. The team is told once for all the days (notifyCancelled).
@@ -806,7 +818,7 @@ async function notifyCancelled(me: Canceller, days: CancelledDay[]) {
   const shortNotice = days.some((d) => d.shortNotice);
   const label = days.length > 1 ? `${first.program_name} (${days.length} days)` : title(first);
   const hadTrainer = days.some((d) => d.b.trainer_id);
-  await notify(await trainingTeam(first, me.id), {
+  await notify(await trainingTeam(first, me), {
     title: `${shortNotice ? "Short-notice cancellation" : "Training cancelled"}: ${label}`,
     body: `${me.full_name}: ${days[0].reason}`,
     link: `/bookings/${first.id}`,
@@ -970,7 +982,7 @@ export async function reassignTraining(fd: FormData) {
     });
   }
   if (released.length) {
-    await notify(await trainingTeam(b, me.id), {
+    await notify(await trainingTeam(b, me), {
       title: `${me.full_name} is reassigning ${b.program_name}`,
       body: `${released.length} ${released.length === 1 ? "day needs" : "days need"} a trainer.`,
       link: `/dashboard/${b.id}`,
@@ -1108,7 +1120,7 @@ export async function submitBrief(bookingId: string, input: DeliveryInput) {
   if (!saved?.length) return { error: "This training changed while you were writing the report. Refresh the page and try again." };
   await audit(r.me.id, "brief_submitted", bookingId, { program: title(r.b), attended: report.attended, engagement: report.engagement });
   const label = first ? "Training delivered" : "Delivery report updated";
-  await notify(await trainingTeam(r.b, r.me.id), {
+  await notify(await trainingTeam(r.b, r.me), {
     title: `${label}: ${title(r.b)}`,
     body: `${r.me.full_name} · ${report.attended} attended · engagement ${report.engagement}/5`,
     link: `/dashboard/${bookingId}`,

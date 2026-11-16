@@ -51,6 +51,16 @@ export function sameDateDays(days: { day_number: number; date: string }[]): [num
   }
   return null;
 }
+// Day numbers follow the dates: Day 1 is the earliest day. Nobody types a day number; after a date changes the
+// days of the training are renumbered. Returns only the days whose number must change.
+export function renumberByDate<T extends { id: string; date: string; start_time: string; day_number: number }>(days: T[]): { id: string; day_number: number }[] {
+  return [...days]
+    .sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time) || a.day_number - b.day_number)
+    .map((d, i) => ({ id: d.id, day_number: i + 1, was: d.day_number }))
+    .filter((d) => d.day_number !== d.was)
+    .map(({ id, day_number }) => ({ id, day_number }));
+}
+
 export const sameDateError = (pair: [number, number]) => `Day ${pair[0]} and Day ${pair[1]} are on the same date. Each training day needs its own date.`;
 
 /* ---------- Participants (the audience, uploaded as a CSV) ---------- */

@@ -184,7 +184,7 @@ export async function submitContent(dealId: string, guide: string) {
       },
     });
   }
-  await notify((await trainingTeam(d.days[0], me.id)).filter((u) => u.id !== requester?.id), {
+  await notify((await trainingTeam(d.days[0], me)).filter((u) => u.id !== requester?.id), {
     title: `Content ${again ? "updated" : "submitted"}: ${label}`,
     body: `${me.full_name} ${again ? "updated" : "submitted"} the content.`,
     link: `/bookings/${d.days[0].id}`,

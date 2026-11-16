@@ -6,7 +6,7 @@ import { Form, Submit } from "@/components/form";
 import { editAvailability, editBooking, editTrainerOptions, type EditTrainerOption } from "@/app/(app)/bookings/actions";
 import { AvailabilityChip } from "@/components/availability-chip";
 
-type Booking = { id: string; program_name: string; day_number: number; date: string; start: string; end: string; location: string; content: string };
+type Booking = { id: string; program_name: string; day_number: number; date: string; start: string; end: string; location: string; content: string; isDeal: boolean };
 
 const WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const dayLabel = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
@@ -84,10 +84,9 @@ export function EditTrainingForm({
     <Form action={save} className="grid gap-3 sm:grid-cols-2">
       <input type="hidden" name="id" value={b.id} />
       <input type="hidden" name="trainer_id" value={pick || "keep"} />
-      <div className="grid grid-cols-[1fr_90px] gap-3 sm:col-span-2">
-        <div><label className="label">Program</label><input name="program_name" defaultValue={b.program_name} className="input" /></div>
-        <div><label className="label">Day #</label><input name="day_number" type="number" min={1} defaultValue={b.day_number} className="input" /></div>
-      </div>
+      <p className="rounded-xl bg-ds-primary-soft px-3 py-2 text-sm text-ds-heading sm:col-span-2">
+        Editing <b>Day {b.day_number}</b> of {b.program_name} · {dayLabel(b.date)}. Days are numbered in date order, so moving this day before or after another one renumbers them.
+      </p>
       <div><label className="label">Date</label><input name="date" type="date" value={when.date} onChange={(e) => setWhen({ ...when, date: e.target.value })} className="input" /></div>
       <div className="grid grid-cols-2 gap-2">
         <div><label className="label">From</label><input name="start" type="time" value={when.start} onChange={(e) => setWhen({ ...when, start: e.target.value })} className="input" /></div>
@@ -164,7 +163,8 @@ export function EditTrainingForm({
       </div>
       )}
 
-      <div className="sm:col-span-2"><label className="label">Content</label><textarea name="content" rows={4} defaultValue={b.content} className="input" /></div>
+      {/* New deals keep their content in the content team's guide; only older requests have content per day. */}
+      {!b.isDeal && <div className="sm:col-span-2"><label className="label">Content</label><textarea name="content" rows={4} defaultValue={b.content} className="input" /></div>}
       <div><Submit>Save changes</Submit></div>
     </Form>
   );

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   clashingDays,
   sameDateDays,
+  renumberByDate,
   contactError,
   dayError,
   dealTotal,
@@ -177,6 +178,14 @@ describe("requestError: the whole New deal, step by step", () => {
     expect(requestError(today, { ...growth, nowTime: "10:00" })).toBe("Day 1: that start time has already passed today.");
     // other dates don't look at the clock
     expect(requestError(validRequest(), { ...growth, nowTime: "23:00" })).toBeNull();
+  });
+  it("day numbers follow the dates after a day moves", () => {
+    const d = (id: string, day_number: number, date: string, start_time = "10:00:00") => ({ id, day_number, date, start_time });
+    expect(renumberByDate([d("a", 1, "2026-11-17"), d("b", 2, "2026-11-25")])).toEqual([]);
+    // Day 1 moved after Day 2: they swap numbers
+    expect(renumberByDate([d("a", 1, "2026-11-30"), d("b", 2, "2026-11-25")])).toEqual([{ id: "b", day_number: 1 }, { id: "a", day_number: 2 }]);
+    // gaps and duplicates are cleaned up
+    expect(renumberByDate([d("a", 2, "2026-11-17"), d("b", 2, "2026-11-24"), d("c", 5, "2026-11-30")])).toEqual([{ id: "a", day_number: 1 }, { id: "c", day_number: 3 }]);
   });
   it("a deal never has two days on the same date", () => {
     const day = validRequest().days[0];
