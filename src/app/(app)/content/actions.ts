@@ -242,6 +242,7 @@ export async function returnContent(dealId: string, note: string) {
         heading: "Your content needs changes",
         intro: `<b>${esc(me.full_name)}</b> reviewed the content you sent and asked for changes before it goes to the trainer. Their note is below.`,
         content: text,
+        contentLabel: "Reviewer's note",
         next: ["Open the content, make the changes in the guide or the files, then send it for approval again."],
         button: "Open the content",
       },

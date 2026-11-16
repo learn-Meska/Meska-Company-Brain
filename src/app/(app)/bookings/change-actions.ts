@@ -72,6 +72,7 @@ export async function requestChange(fd: FormData) {
         ...upcoming.map((d) => [`Day ${d.day_number}`, esc(fmtDate(d.date, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))] as [string, string]),
       ],
       content: read.reason,
+      contentLabel: "Reason from Growth",
       next: [
         read.kind === "trainer"
           ? "<b>Training Excellence:</b> open the training. Reassign the trainer, or keep them and tell Growth why."
@@ -147,6 +148,7 @@ export async function resolveChangeRequest(fd: FormData) {
           ["Your reason", esc(r.reason)],
         ],
         content: read.note ?? undefined,
+        contentLabel: "Note from Training Excellence",
         next: [done ? "Open the training to see the change. You'll be notified when the trainer confirms." : "If something new came up, you can send another request with the details."],
         button: "View the training",
       },
