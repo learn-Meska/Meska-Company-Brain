@@ -11,7 +11,6 @@ import type { CheckDay } from "@/lib/availability-check";
 import {
   clashingDays,
   dealTotal,
-  dealDaysError,
   dealValueError,
   fmtAmount,
   parseAmount,
@@ -85,7 +84,6 @@ export function RequestBuilder({
       : [{ key: 1, date: "", start: "10:00", end: "15:00", location: "", trainerId: "" }],
   );
   // Shown once the proposal's day count is valid, while the days added in step 4 differ from it.
-  const daysError = !valueError && dealDays ? dealDaysError(nDays, days.length) : null;
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
   const patch = (key: number, p: Partial<Day>) => setDays((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d)));
@@ -164,7 +162,6 @@ export function RequestBuilder({
     // A file that couldn't be read is never sent silently as "no audience".
     if (people?.error) return setErr("The participants file has a problem (step 2). Fix it, or remove it to send the deal without an audience.");
     if (!proposal) return setErr("Upload the training outline (step 3).");
-    if (daysError) return setErr(daysError);
     start(async () => {
       const r = await createRequest({
         ...f,
@@ -318,7 +315,6 @@ export function RequestBuilder({
           </div>
           <button type="button" onClick={addDay} className="btn-ghost">+ Add another day</button>
         </div>
-        {daysError && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{daysError}</p>}
         {days.map((d, i) => (
           <div key={d.key} className="rounded-2xl border border-line p-4">
             <div className="mb-3 flex items-center justify-between">
