@@ -118,9 +118,9 @@ describe("New deal: happy path", () => {
     // no trainer is emailed; Training Excellence is asked to assign one, and the content team is told
     expect(h.notified.map((n) => n.title)).toEqual(["Trainer needed: Aman Holding HR (2 of 2 days)", "New content request: Aman Holding — Aman Holding HR"]);
     expect(h.notified[0].email!.subject).toMatch(/^Action needed: assign a trainer/);
-    // the content team gets the company, program, headcount and first day (the deadline), never the deal value or proposal
+    // the content team gets a bell notification only: Training Excellence's is the one email a new deal sends
     expect(h.notified[1].to).toEqual(["content@meska.ai"]);
-    expect(Object.fromEntries(h.notified[1].email!.rows!)).toEqual({ Company: "Aman Holding", Program: "Aman Holding HR", Days: "2", Participants: "2", "First day": "Tuesday, 10 November 2026" });
+    expect(h.notified[1].email).toBeUndefined();
     const teamRows = Object.fromEntries(h.notified[0].email!.rows!);
     expect(teamRows["Participants"]).toBe("2");
     expect(teamRows["Deal value"]).toBe("100,000 per day × 2 days = <b>200,000</b>");
@@ -134,7 +134,6 @@ describe("New deal: happy path", () => {
     expect(r.error).toBeUndefined();
     expect(h.fake.writes.map((w) => w.table)).toEqual(["deals", "bookings"]);
     expect(Object.fromEntries(h.notified[0].email!.rows!)["Participants"]).toBe("Not provided yet");
-    expect(Object.fromEntries(h.notified[1].email!.rows!)["Participants"]).toBe("Not provided yet");
     expect(h.audits[0].details).toMatchObject({ participants: 0 });
   });
 

@@ -240,38 +240,18 @@ export async function createRequest(input: NewRequest) {
             ...(open.length ? [`<b>Training Excellence:</b> open the training and assign a trainer to ${open.length === rows.length ? "every day" : `the ${open.length} ${open.length === 1 ? "day" : "days"} without one`}. The trainer is then emailed to confirm.`] : []),
             ...(rows.length > open.length ? ["The chosen trainer was emailed the assignment and asked to confirm. You'll be notified when they answer."] : []),
             participants.length
-              ? "The content team was asked to prepare the training content from the training outline and the audience."
-              : "The content team was asked to prepare the training content from the training outline. The participant list wasn't provided yet; it can be uploaded on the deal later.",
+              ? "The content team sees the deal on Content requests and prepares the content from the training outline and the audience."
+              : "The content team sees the deal on Content requests and prepares the content from the training outline. The participant list wasn't provided yet; it can be uploaded on the deal later.",
           ],
           button: open.length ? "Assign a trainer" : "View the training",
         },
       });
-      // The content team gets the request too: they read the audience and proposal, then write the content.
+      // The content team sees the new deal in the bell and on Content requests, without an email: the only email a
+      // new deal sends is Training Excellence's "assign a trainer", so nobody gets two emails for one deal.
       await notify(await usersWithRoles("content"), {
         title: `New content request: ${input.company_name.trim()} — ${input.program_name}`,
         body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the ${participants.length ? "audience and training outline" : "training outline"}.`,
         link: `/content/${dealId}`,
-        email: {
-          subject: `Action needed: prepare content for ${input.company_name.trim()} · ${input.program_name} (first day ${fmtDate(rows[0].date, { day: "numeric", month: "short" })})`,
-          heading: "New content request",
-          step: "requested",
-          intro: `<b>${esc(me.full_name)}</b> from Growth sent a new deal. The training needs content before the trainer delivers it.`,
-          rows: [
-            ["Company", esc(input.company_name.trim())],
-            ["Program", esc(input.program_name)],
-            ["Days", String(rows.length)],
-            ["Participants", headcount],
-            ["First day", esc(fmtDate(rows[0].date))],
-          ],
-          next: [
-            participants.length
-              ? "Open the request and read the audience (participants) and the training outline."
-              : "Open the request and read the training outline. The participant list wasn't provided yet; you'll be told when it is added.",
-            "Write the content guide and upload the files.",
-            "Submit the content. The assigned trainer and the team are then notified and can use it.",
-          ],
-          button: "Open the request",
-        },
       });
     } catch (e) {
       console.error("[createRequest notify]", e instanceof Error ? e.message : e);
