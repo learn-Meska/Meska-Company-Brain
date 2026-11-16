@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { inviteTrainer } from "@/app/(app)/admin/actions";
+import { Form, Submit } from "@/components/form";
 import { ProfileView } from "@/components/profile";
+import { fmtDateTime } from "@/lib/format";
 import { canManageTrainers, requireAccess } from "@/lib/auth";
 import { getTrainerProfiles } from "@/lib/scoring";
 
@@ -19,6 +22,27 @@ export default async function TrainerPage({ params }: PageProps<"/trainers/[id]"
           {canManageTrainers(me) && <Link href={`/trainers/${id}/edit`} className="btn-ghost">Edit profile &amp; scores</Link>}
         </div>
       </div>
+      {/* Training Excellence re-sends the invitation from here when a trainer lost it or the link expired. */}
+      {canManageTrainers(me) && (
+        <section className="card flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="h2">Invitation</h2>
+            <p className="text-sm text-muted">
+              {!t.email
+                ? "Add the trainer's email on Edit profile to send the invitation."
+                : t.user_id
+                  ? `Sent to ${t.email}${t.invited_at ? ` on ${fmtDateTime(t.invited_at)}` : ""}. Resend it if they lost the email or the link expired.`
+                  : `Not sent yet. The invitation lets ${t.email} set a password and sign in.`}
+            </p>
+          </div>
+          {t.email && (
+            <Form action={inviteTrainer} className="text-right">
+              <input type="hidden" name="id" value={t.id} />
+              <Submit pending="Sending…">{t.user_id ? "Resend invitation" : "Send invitation"}</Submit>
+            </Form>
+          )}
+        </section>
+      )}
       <ProfileView t={t} />
     </div>
   );
