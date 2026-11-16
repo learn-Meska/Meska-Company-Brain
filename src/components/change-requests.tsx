@@ -44,6 +44,11 @@ export async function ChangeRequestBanner({ bookingId, data, viewer }: { booking
   const team = isTeam(viewer);
   const answer = team && mayAnswer(viewer, r.kind);
   const alt = team && r.kind === "trainer" && viewer.canAssign ? await alternatives(data, today) : null;
+  // A date request names the day it was raised from.
+  const dayOf = (id: string) => {
+    const d = r.kind === "date" ? data.days.find((x) => x.id === id) : null;
+    return d ? `Day ${d.day_number} (${fmtDate(d.date, { weekday: "short", day: "numeric", month: "short" })})` : "";
+  };
 
   return (
     <section className="ds-card relative overflow-hidden border-warn/40 p-5 sm:p-6">
@@ -51,7 +56,7 @@ export async function ChangeRequestBanner({ bookingId, data, viewer }: { booking
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <span className="badge bg-warn-bg text-warn">Change requested</span>
-          <h2 className="mt-2 text-lg font-semibold text-ds-heading">{team ? `${by} asked for ${CHANGE_KIND_ASK[r.kind]}` : `You asked for ${CHANGE_KIND_ASK[r.kind]}`}</h2>
+          <h2 className="mt-2 text-lg font-semibold text-ds-heading">{team ? `${by} asked for ${CHANGE_KIND_ASK[r.kind]}` : `You asked for ${CHANGE_KIND_ASK[r.kind]}`}{dayOf(r.booking_id) ? ` for ${dayOf(r.booking_id)}` : ""}</h2>
           <p className="text-sm text-ds-text">
             {team ? "From Growth" : `Sent by ${by}`} · {fmtDateTime(r.created_at)} · {team ? "The trainer is not told about this request." : "Waiting for Training Excellence. You'll be notified when they answer."}
           </p>
@@ -92,7 +97,7 @@ export async function ChangeRequestBanner({ bookingId, data, viewer }: { booking
             {r.kind !== "trainer" && (
               <div className="rounded-xl border border-ds-border p-4">
                 <h3 className="text-sm font-semibold text-ds-heading">Mark as done</h3>
-                <p className="mt-1 text-xs text-ds-text">{r.kind === "date" ? "Use this once the days are moved." : "Use this if the training was already cancelled another way."} Growth is told.</p>
+                <p className="mt-1 text-xs text-ds-text">{r.kind === "date" ? <>Use this once the day is moved{r.booking_id !== bookingId && dayOf(r.booking_id) ? <> (<a className="text-ds-primary underline" href={`/bookings/${r.booking_id}#edit`}>open {dayOf(r.booking_id)}</a>)</> : null}.</> : "Use this if the training was already cancelled another way."} Growth is told.</p>
                 <Form action={resolveChangeRequest} className="mt-3 space-y-2">
                   <input type="hidden" name="id" value={r.id} />
                   <input type="hidden" name="outcome" value="done" />
@@ -161,6 +166,7 @@ export function ChangeRequestSection({ bookingId, data, viewer, canChangeItself 
   const waiting = openRequest(data, today);
   const past = data.requests.filter((r) => r.id !== waiting?.id && r.status !== "open").slice(0, 5);
   const kinds = viewer.role === "growth" && !waiting ? requestableKinds(data.days, today, canChangeItself) : [];
+  const thisDay = data.days.length > 1 ? data.days.find((d) => d.id === bookingId) : null;
   if (!kinds.length && !past.length) return null;
   return (
     <section className="ds-card overflow-hidden">
@@ -176,6 +182,7 @@ export function ChangeRequestSection({ bookingId, data, viewer, canChangeItself 
         <div className="px-5 py-4 sm:px-6">
           <Form action={requestChange} reset className="space-y-3">
             <input type="hidden" name="id" value={bookingId} />
+            {thisDay && <p className="text-sm text-ds-heading">For <b>Day {thisDay.day_number}</b> · {fmtDate(thisDay.date, { weekday: "short", day: "numeric", month: "short" })}. To ask about another day, open it from “Days of this training” above.</p>}
             <div className="max-w-sm">
               <label className="label" htmlFor="cr-kind">What should change?</label>
               <select id="cr-kind" name="kind" className="input" defaultValue={kinds[0]}>

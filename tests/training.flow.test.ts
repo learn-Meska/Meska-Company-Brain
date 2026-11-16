@@ -195,6 +195,12 @@ describe("change requests", () => {
     expect(await ask("date", NEXT_DAY)).toEqual({ error: expect.stringMatching(/already waiting/) });
     expect(requests()).toHaveLength(1);
   });
+  it("a confirmed day: Growth asks to move that day, and Training Excellence is told which day", async () => {
+    asGrowth();
+    expect(await ask("date", LAST_DAY)).toEqual({ ok: expect.stringMatching(/Request sent/) });
+    expect(requests()).toMatchObject([{ booking_id: LAST_DAY, kind: "date" }]);
+    expect(h.notified).toEqual([{ to: ["admin@meska.ai"], title: "Growth Person asked for a different date or time for Day 3 (Sat 10 Jan): AI in HR" }]);
+  });
   it("only on a training that Growth login can open, and never a trainer or the content team", async () => {
     asGrowth("growth-2");
     expect(await ask()).toEqual({ error: "Training not found." });

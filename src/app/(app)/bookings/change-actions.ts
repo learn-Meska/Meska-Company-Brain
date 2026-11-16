@@ -52,18 +52,23 @@ export async function requestChange(fd: FormData) {
 
   const upcoming = days.filter((d) => d.status !== "cancelled" && !d.finished_at && d.date >= todayISO());
   const ask = CHANGE_KIND_ASK[read.kind];
-  const to = (await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id);
+  // A date request is about the day it was raised from; the title and email name that day.
+  const thisDay = days.find((d) => d.id === b.id);
+  const forDay = read.kind === "date" && thisDay ? ` for Day ${thisDay.day_number} (${fmtDate(thisDay.date, { weekday: "short", day: "numeric", month: "short" })})` : "";
+  // Everyone in Training Excellence, the Growth requester included when they also hold Training Excellence.
+  const to = await usersWithRoles("admin", "approver");
   await notify(to, {
-    title: `${me.full_name} asked for ${ask}: ${b.program_name}`,
+    title: `${me.full_name} asked for ${ask}${forDay}: ${b.program_name}`,
     body: read.reason.slice(0, 200),
     link: `/bookings/${b.id}`,
     email: {
-      subject: `Action needed: ${me.full_name} asked for ${ask} — ${b.program_name}`,
-      heading: `Growth asked for ${ask}`,
-      intro: `<b>${esc(me.full_name)}</b> from Growth asked for <b>${esc(ask)}</b> on <b>${esc(b.program_name)}</b>. Their reason is below. The trainer is not told about the request.`,
+      subject: `Action needed: ${me.full_name} asked for ${ask}${forDay} — ${b.program_name}`,
+      heading: `Growth asked for ${ask}${forDay}`,
+      intro: `<b>${esc(me.full_name)}</b> from Growth asked for <b>${esc(ask)}</b>${esc(forDay)} on <b>${esc(b.program_name)}</b>. Their reason is below. The trainer is not told about the request.`,
       rows: [
         ["Program", esc(b.program_name)],
         ["Request", esc(CHANGE_KIND_LABEL[read.kind])],
+        ...(forDay && thisDay ? [["Day to move", esc(`Day ${thisDay.day_number} · ${fmtDate(thisDay.date)}`)] as [string, string]] : []),
         ...upcoming.map((d) => [`Day ${d.day_number}`, esc(fmtDate(d.date, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))] as [string, string]),
       ],
       content: read.reason,
@@ -71,7 +76,7 @@ export async function requestChange(fd: FormData) {
         read.kind === "trainer"
           ? "<b>Training Excellence:</b> open the training. Reassign the trainer, or keep them and tell Growth why."
           : read.kind === "date"
-            ? "<b>Training Excellence:</b> open the training. Move the days in Edit training and mark the request as done, or decline it with a note."
+            ? `<b>Training Excellence:</b> open the training${forDay ? ` at Day ${thisDay!.day_number}` : ""}, move it in Edit training and mark the request as done, or decline it with a note.`
             : "<b>Training Excellence:</b> open the training. Cancel it, or decline the request with a note.",
         "Growth is notified of your answer.",
       ],
@@ -97,7 +102,7 @@ export async function withdrawChangeRequest(fd: FormData) {
   if (error) return { error: friendlyError(error.message) };
   if (!data?.length) return { error: "This request was already answered. Refresh the page." };
   await audit(me.id, "change_request_withdrawn", b.id, { program: b.program_name, kind: r.kind });
-  await notify((await usersWithRoles("admin", "approver")).filter((u) => u.id !== me.id), {
+  await notify(await usersWithRoles("admin", "approver"), {
     title: `Change request withdrawn: ${b.program_name}`,
     body: `${me.full_name} no longer asks for ${CHANGE_KIND_ASK[r.kind]}.`,
     link: `/bookings/${b.id}`,
