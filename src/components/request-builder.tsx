@@ -4,8 +4,12 @@ import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { Dropzone } from "@/components/dropzone";
+import { AvailabilityChip } from "@/components/availability-chip";
+import { checkAvailability } from "@/app/(app)/availability/actions";
 import { createProposalUpload, createRequest, requestTrainerOptions } from "@/app/(app)/bookings/actions";
+import type { CheckDay } from "@/lib/availability-check";
 import {
+  clashingDays,
   dealTotal,
   dealDaysError,
   dealValueError,
@@ -30,7 +34,7 @@ const PRESETS = [
   { label: "Evening 6 PM – 10 PM", start: "18:00", end: "22:00" },
 ];
 
-// Opens the trainer's profile PDF (the document Growth shares with clients).
+// Opens the trainer's profile PDF (booking team only: Growth never sees who is free).
 function ProfileLink({ id }: { id: string }) {
   return (
     <a href={`/trainers/${id}/bio`} className="btn-ghost btn-sm whitespace-nowrap" title="Download this trainer's profile (PDF)">
@@ -45,47 +49,80 @@ function addDays(d: string, n: number) {
   return x.toISOString().slice(0, 10);
 }
 
-// trainerRequired: Growth must choose the trainer for every day; booking staff may leave it to assign later.
-export function RequestBuilder({ industries, today, trainerRequired }: { industries: Opt[]; today: string; trainerRequired: boolean }) {
+// The New deal form. canAssign: the booking team may pick a trainer per day. Growth can't: it only sees whether
+// a trainer is available, and every day goes to Training Excellence, who assign the trainer.
+export function RequestBuilder({
+  industries,
+  today,
+  canAssign,
+  initialDays = [],
+  initialIndustry = "",
+}: {
+  industries: Opt[];
+  today: string;
+  canAssign: boolean;
+  // days and industry carried over from Check availability
+  initialDays?: CheckDay[];
+  initialIndustry?: string;
+}) {
   const router = useRouter();
-  const [f, setF] = useState({ company_name: "", program_name: "", industry_id: "" });
+  const [f, setF] = useState({ company_name: "", program_name: "", industry_id: industries.some((i) => i.id === initialIndustry) ? initialIndustry : "" });
   const [contact, setContact] = useState({ name: "", email: "", mobile: "" });
-  // Step 2: the participant list read from the uploaded CSV
+  // Step 2 (optional): the participant list read from the uploaded CSV
   const [people, setPeople] = useState<{ file: string; list: Participant[]; error: string } | null>(null);
   // Step 3: the proposal (already in storage once uploaded) and the deal value
   const [proposal, setProposal] = useState<ProposalFile | null>(null);
   const [proposalMsg, setProposalMsg] = useState<{ busy?: boolean; error?: string }>({});
   const [valuePerDay, setValuePerDay] = useState("");
-  const [dealDays, setDealDays] = useState("");
+  const [dealDays, setDealDays] = useState(initialDays.length ? String(initialDays.length) : "");
   const perDay = parseAmount(valuePerDay);
   const nDays = Number(dealDays);
   const valueError = valuePerDay || dealDays ? dealValueError(perDay, nDays) : null;
   const [same, setSame] = useState(false);
-  const [days, setDays] = useState<Day[]>([{ key: 1, date: "", start: "10:00", end: "15:00", location: "", trainerId: "" }]);
+  const [days, setDays] = useState<Day[]>(
+    initialDays.length
+      ? initialDays.map((d, i) => ({ key: i + 1, date: d.date, start: d.start, end: d.end, location: "", trainerId: "" }))
+      : [{ key: 1, date: "", start: "10:00", end: "15:00", location: "", trainerId: "" }],
+  );
   // Shown once the proposal's day count is valid, while the days added in step 4 differ from it.
   const daysError = !valueError && dealDays ? dealDaysError(nDays, days.length) : null;
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
-  // trainers free at each day's time (availability is the only filter for now)
-  const [options, setOptions] = useState<{ query: string; days: TrainerOpt[][] | null; error: string }>({ query: "", days: null, error: "" });
   const patch = (key: number, p: Partial<Day>) => setDays((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d)));
 
   const ready = days.every((d) => d.date && d.start && d.end);
-  const query = ready ? JSON.stringify([days.map((d) => [d.date, d.start, d.end])]) : "";
+  const query = ready ? JSON.stringify([canAssign ? "" : f.industry_id, days.map((d) => [d.date, d.start, d.end])]) : "";
+  // Booking team: the trainers free on each day. Growth: only whether a trainer is available on each day.
+  const [options, setOptions] = useState<{ query: string; days: TrainerOpt[][] | null; error: string }>({ query: "", days: null, error: "" });
+  const [avail, setAvail] = useState<{ query: string; days: boolean[] | null; sameTrainer: boolean | null; error: string }>({ query: "", days: null, sameTrainer: null, error: "" });
   useEffect(() => {
     if (!query) return;
+    let live = true;
     const t = setTimeout(async () => {
-      const r = await requestTrainerOptions({ days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end })) });
-      setOptions({ query, days: "days" in r && r.days ? r.days : null, error: r.error ?? "" });
-      // drop a pick that no longer fits
-      if ("days" in r && r.days) setDays((ds) => ds.map((d, i) => (d.trainerId && !r.days![i]?.some((x) => x.id === d.trainerId) ? { ...d, trainerId: "" } : d)));
+      if (canAssign) {
+        const r = await requestTrainerOptions({ days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end })) }).catch(() => ({ error: "Couldn't load the free trainers. Check your connection." }));
+        if (!live) return;
+        const list = "days" in r && r.days ? r.days : null;
+        setOptions({ query, days: list, error: "error" in r ? (r.error ?? "") : "" });
+        // drop a pick that no longer fits
+        if (list) setDays((ds) => ds.map((d, i) => (d.trainerId && !list[i]?.some((x) => x.id === d.trainerId) ? { ...d, trainerId: "" } : d)));
+      } else {
+        const r = await checkAvailability({ industry_id: f.industry_id || null, days: days.map((d) => ({ date: d.date, start: d.start, end: d.end })) }).catch(() => ({ error: "Couldn't check availability. Check your connection." }));
+        if (!live) return;
+        setAvail("days" in r ? { query, days: r.days, sameTrainer: r.sameTrainer, error: "" } : { query, days: null, sameTrainer: null, error: r.error ?? "" });
+      }
     }, 350);
-    return () => clearTimeout(t);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `query` captures every input that matters
   }, [query]);
   const opts = options.query === query ? options.days : null;
   const common = opts && opts.length > 1 ? opts[0].filter((t) => opts.every((l) => l.some((x) => x.id === t.id))) : [];
   const sameId = same && days.length > 1 && days.every((d) => d.trainerId === days[0].trainerId) ? days[0].trainerId : "";
+  const free = avail.query === query ? avail : null;
+  const clash = same && ready ? clashingDays(days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end }))) : null;
 
   function addDay() {
     const last = days[days.length - 1];
@@ -124,19 +161,20 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
 
   function submit() {
     setErr("");
-    if (!people?.list.length) return setErr("Upload the participants file (step 2).");
+    // A file that couldn't be read is never sent silently as "no audience".
+    if (people?.error) return setErr("The participants file has a problem (step 2). Fix it, or remove it to send the deal without an audience.");
     if (!proposal) return setErr("Upload the training outline (step 3).");
     if (daysError) return setErr(daysError);
     start(async () => {
       const r = await createRequest({
         ...f,
         contact,
-        participants: people.list,
+        participants: people?.list ?? [],
         proposal,
         value_per_day: perDay,
         deal_days: nDays,
         same_trainer: same,
-        days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end, location: d.location, trainer_id: d.trainerId || undefined })),
+        days: days.map((d, i) => ({ day_number: i + 1, date: d.date, start: d.start, end: d.end, location: d.location, trainer_id: canAssign ? d.trainerId || undefined : undefined })),
       }).catch(() => ({ error: "That didn't go through. Check your connection and try again.", ids: undefined }));
       if (r.error) return setErr(r.error);
       router.push(r.ids?.length === 1 ? `/bookings/${r.ids[0]}?requested=1` : "/bookings?requested=1");
@@ -182,9 +220,9 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
       <section className="card space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <div className="eyebrow">Step 2</div>
+            <div className="eyebrow">Step 2 · optional</div>
             <h2 className="h2">Audience</h2>
-            <p className="text-sm text-muted">Download the template, add one participant per row (name, title, department), save it as CSV and upload it.</p>
+            <p className="text-sm text-muted">If you have the participant list, download the template, add one participant per row (name, title, department), save it as CSV and upload it. You can also add it later from the deal.</p>
           </div>
           <a
             className="btn-ghost"
@@ -202,6 +240,11 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           onFile={readParticipants}
         />
         {people?.error && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{people.file}: {people.error}</p>}
+        {people && (
+          <button type="button" className="text-xs text-bad hover:underline" onClick={() => setPeople(null)}>
+            Remove the file and send without an audience
+          </button>
+        )}
         {people && !people.error && people.list.length > 0 && (
           <div className="overflow-x-auto rounded-xl border border-line">
             <table className="w-full text-sm">
@@ -267,7 +310,11 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
           <div>
             <div className="eyebrow">Step 4</div>
             <h2 className="h2">Training days</h2>
-            <p className="text-sm text-muted">Add each day with its date, time and location{trainerRequired ? ", then choose the trainer" : ""}.</p>
+            <p className="text-sm text-muted">
+              {canAssign
+                ? "Add each day with its date, time and location. Choose a trainer now, or leave days to assign later."
+                : "Add each day with its date, time and location. You'll see whether a trainer is available; Training Excellence assigns the trainer after you send the deal."}
+            </p>
           </div>
           <button type="button" onClick={addDay} className="btn-ghost">+ Add another day</button>
         </div>
@@ -307,26 +354,33 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                 </button>
               ))}
             </div>
-            <div className="mt-3 max-w-md">
-              <div>
-                <label className="label" htmlFor={`t${d.key}`}>Trainer{trainerRequired ? " *" : ""}</label>
+            {!canAssign ? (
+              <div className="mt-3">
+                <div className="label">Trainer availability</div>
+                {!ready ? (
+                  <p className="text-xs text-muted">Fill in the date and time of every day to check availability.</p>
+                ) : !free ? (
+                  <p className="text-xs text-muted">Checking availability…</p>
+                ) : free.error || !free.days ? (
+                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">{free.error || "Couldn't check availability."}</p>
+                ) : (
+                  <AvailabilityChip available={free.days[i]} />
+                )}
+              </div>
+            ) : (
+              <div className="mt-3 max-w-md">
+                <label className="label" htmlFor={`t${d.key}`}>Trainer</label>
                 {!ready ? (
                   <p className="text-xs text-muted">Fill in the date and time to see the available trainers.</p>
                 ) : !opts ? (
                   <p className="text-xs text-muted">{options.query === query && options.error ? options.error : "Finding available trainers…"}</p>
                 ) : opts[i].length === 0 ? (
-                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No matching trainer is free at this time. Try another date or time{trainerRequired ? ", or contact Training Excellence" : ""}.</p>
+                  <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No trainer is free at this time. Try another date or time, or leave the day to assign later.</p>
                 ) : (
                   <>
                     <div className="flex items-center gap-2">
-                      <select
-                        id={`t${d.key}`}
-                        className="input"
-                        value={d.trainerId}
-                        disabled={!!sameId}
-                        onChange={(e) => patch(d.key, { trainerId: e.target.value })}
-                      >
-                        <option value="">{trainerRequired ? "Choose a trainer…" : "Leave to Training Excellence"}</option>
+                      <select id={`t${d.key}`} className="input" value={d.trainerId} disabled={!!sameId} onChange={(e) => patch(d.key, { trainerId: e.target.value })}>
+                        <option value="">Assign later</option>
                         {opts[i].map((t) => (
                           <option key={t.id} value={t.id}>
                             {t.full_name}
@@ -353,9 +407,14 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                   </>
                 )}
               </div>
-            </div>
+            )}
           </div>
         ))}
+        {!canAssign && free?.days?.some((x) => !x) && (
+          <p className="rounded-xl bg-warn-bg px-3 py-2 text-sm text-warn">
+            No trainer is free yet on {free.days.filter((x) => !x).length === 1 ? "one of these days" : "some of these days"}. You can still send the deal: Training Excellence will follow up, or you can try another date or time.
+          </p>
+        )}
         {days.length > 1 && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface2 px-3 py-2">
             <label className="flex items-center gap-2 text-sm">
@@ -367,17 +426,19 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
                   if (!e.target.checked) setDays((ds) => ds.map((d) => ({ ...d, trainerId: "" })));
                 }}
               />{" "}
-              Same trainer for all days
+              {canAssign ? "Same trainer for all days" : "I prefer the same trainer for all days"}
             </label>
+            {same && clash && <span className="text-xs text-bad">Day {clash[0]} and Day {clash[1]} are at the same time, so one trainer can&apos;t deliver both.</span>}
+            {same && !clash && !canAssign && free?.days && (
+              <span className={`text-xs ${free.sameTrainer ? "text-good" : "text-warn"}`}>
+                {free.sameTrainer ? "One trainer can take every day." : "No single trainer is free on every day, so Training Excellence may assign more than one."}
+              </span>
+            )}
             {same &&
+              canAssign &&
               (opts && common.length ? (
                 <>
-                  <select
-                    className="input w-auto py-1.5"
-                    aria-label="Trainer for all days"
-                    value={sameId}
-                    onChange={(e) => setDays((ds) => ds.map((d) => ({ ...d, trainerId: e.target.value })))}
-                  >
+                  <select className="input w-auto py-1.5" aria-label="Trainer for all days" value={sameId} onChange={(e) => setDays((ds) => ds.map((d) => ({ ...d, trainerId: e.target.value })))}>
                     <option value="">Choose a trainer free on all days…</option>
                     {common.map((t) => (
                       <option key={t.id} value={t.id}>{t.full_name}</option>
@@ -394,11 +455,13 @@ export function RequestBuilder({ industries, today, trainerRequired }: { industr
 
       {err && <p className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{err}</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button className="btn" disabled={pending || proposalMsg.busy || (trainerRequired && days.some((d) => !d.trainerId))} onClick={submit}>
+        <button className="btn" disabled={pending || proposalMsg.busy} onClick={submit}>
           {pending ? "Sending…" : days.length > 1 ? `Send deal · ${days.length} days` : "Send deal"}
         </button>
         <span className="text-xs text-muted">
-          {trainerRequired ? "The trainer is emailed to confirm and Training Excellence is notified." : "Days with a trainer are emailed to the trainer; the rest go on the calendar as “Needs a trainer”."}
+          {canAssign
+            ? "Days with a trainer are emailed to the trainer; the rest go on the calendar as “Needs a trainer”."
+            : "The deal goes to Training Excellence as a new training request. You're notified when a trainer is assigned and when they confirm."}
         </span>
       </div>
     </div>

@@ -14,6 +14,8 @@ import { EditTrainingForm } from "@/components/edit-training-form";
 import { seesDealOf } from "@/lib/team-people";
 import { TeamFeedbackCard } from "@/components/team-feedback";
 import { seesTeamFeedback } from "@/lib/team-feedback";
+import { ChangeRequestBanner, ChangeRequestSection } from "@/components/change-requests";
+import { trainingChangeRequests } from "@/lib/change-requests";
 
 type Log = { id: string; action: string; details: Record<string, unknown> | null; created_at: string; app_users: { full_name: string } | null };
 
@@ -26,10 +28,12 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   const b = data as BookingRow;
   // A Growth member only opens their own requests, a team leader also their members'; admins open any.
   if (!(await seesDealOf(me, b.created_by))) notFound();
-  const [{ data: logs }, rule] = await Promise.all([
+  const [{ data: logs }, rule, changes] = await Promise.all([
     db().from("audit_log").select("*, app_users(full_name)").eq("booking_id", id).order("created_at"),
     getSetting("cancellation", { notice_hours: 48, min_reason_chars: 150 }),
+    trainingChangeRequests(b),
   ]);
+  const viewer = { role: me.role, canAssign: can(me, "te.assign"), canEdit: can(me, "te.edit"), canCancel: can(me, "te.cancel") };
   const ownRequest = can(me, "growth.new_deal") && b.created_by === me.id;
   const canChange = ACTIVE_STATUSES.includes(b.status) && (can(me, "te.edit") || (ownRequest && ["needs_trainer", "awaiting_trainer"].includes(b.status)));
   const canCancel = ACTIVE_STATUSES.includes(b.status) && (can(me, "te.cancel") || (ownRequest && ["needs_trainer", "awaiting_trainer"].includes(b.status)));
@@ -38,7 +42,8 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   return (
     <div className="space-y-5">
       {can(me, "te.dashboard") ? <Link href={`/dashboard/${b.id}`} className="text-sm text-blue hover:underline">← Dashboard</Link> : <Link href="/bookings" className="text-sm text-blue hover:underline">← Bookings</Link>}
-      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and Training Excellence was notified." : "Request sent. It's on the calendar as “Needs a trainer” and Training Excellence was notified."}</p>}
+      {requested && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">{b.trainer_id ? "Request sent. The trainer was emailed to confirm and Training Excellence was notified." : "Request sent. Training Excellence was notified and will assign the trainer. You'll be told when they do."}</p>}
+      <ChangeRequestBanner bookingId={b.id} data={changes} viewer={viewer} />
       {b.status === "needs_trainer" && canBook(me) && (
         <section className="card border-2 border-[#F4A9C4]">
           <div className="eyebrow">Needs a trainer</div>
@@ -49,7 +54,9 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
       )}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
       <Ticket b={b} canUpload={me.role === "admin" && b.status !== "cancelled"} />
-      {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} showValue={can(me, "te.deal_value") || can(me, "growth.deal_value")} />}
+      {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} showValue={can(me, "te.deal_value") || can(me, "growth.deal_value")} canEditParticipants={can(me, "te.edit") || can(me, "growth.new_deal")} />}
+
+      <ChangeRequestSection bookingId={b.id} data={changes} viewer={viewer} canChangeItself={canChange || canCancel} />
 
       {seesTeamFeedback(me.role) && b.status !== "cancelled" && <TeamFeedbackCard booking={b} me={me} />}
 
@@ -72,11 +79,15 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
           {canChange && (
           <section className="card">
             <h2 className="h2 mb-1">Edit training</h2>
-            <p className="mb-3 text-xs text-muted">Change the date or time and pick from the trainers free then. A new trainer, or a new date for a confirmed trainer, is asked to confirm, and everyone on the training is notified of what changed.</p>
+            <p className="mb-3 text-xs text-muted">
+              {can(me, "te.edit")
+                ? "Change the date or time and pick from the trainers free then. A new trainer, or a new date for a confirmed trainer, is asked to confirm, and everyone on the training is notified of what changed."
+                : "Change the date, time or location. You'll see whether the trainer can still make it; everyone on the training is notified of what changed. Training Excellence assigns the trainer."}
+            </p>
             <EditTrainingForm
               b={{ id: b.id, program_name: b.program_name, day_number: b.day_number, date: b.date, start: b.start_time.slice(0, 5), end: b.end_time.slice(0, 5), location: b.location ?? "", content: b.content }}
               current={b.trainer_id && b.trainers ? { id: b.trainer_id, name: b.trainers.full_name } : null}
-              trainerRequired={!can(me, "te.edit")}
+              pickTrainer={can(me, "te.edit")}
               canViewProfiles={can(me, "growth.trainers") || can(me, "te.trainers") || can(me, "te.find") || can(me, "te.assign")}
             />
           </section>

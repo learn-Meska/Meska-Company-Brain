@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ProposalActions } from "@/components/booking-ui";
 import { FileBadge } from "@/components/file-badge";
+import { ParticipantsUpload } from "@/components/participants-upload";
 import { BuildingIcon, CalendarIcon, CoinsIcon, DownloadIcon, LayersIcon, TagIcon, UsersIcon } from "@/components/icons";
 import { db } from "@/lib/supabase";
 import { dealTotal, fmtAmount } from "@/lib/deal";
@@ -32,7 +33,20 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
 // The commercial side of a New deal: value, proposal and the participant list. Meska team only, never trainers.
 // `actions` (e.g. reassign or cancel the training) are shown under the participants.
 // showValue: only logins with "See deal value" get the value and the proposal.
-export async function DealCard({ dealId, bookingId, actions, showValue = true }: { dealId: string; bookingId: string; actions?: ReactNode; showValue?: boolean }) {
+// canEditParticipants: may add or replace the participant list (the audience is optional when the deal is sent).
+export async function DealCard({
+  dealId,
+  bookingId,
+  actions,
+  showValue = true,
+  canEditParticipants = false,
+}: {
+  dealId: string;
+  bookingId: string;
+  actions?: ReactNode;
+  showValue?: boolean;
+  canEditParticipants?: boolean;
+}) {
   const [{ data: deal }, { data: people }, { data: days }] = await Promise.all([
     db().from("deals").select("id, company_name, value_per_day, days, proposal_name, proposal_size").eq("id", dealId).maybeSingle(),
     db().from("deal_participants").select("name, title, department").eq("deal_id", dealId).order("position").range(0, 999),
@@ -85,14 +99,19 @@ export async function DealCard({ dealId, bookingId, actions, showValue = true }:
             <span className="ds-icon-soft h-9 w-9"><UsersIcon size={18} /></span>
             Participants ({list.length})
           </h3>
-          {list.length > 0 && (
-            <a href={`/bookings/${bookingId}/participants`} className="ds-btn ds-btn-primary">
-              <DownloadIcon size={16} /> Download CSV
-            </a>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {canEditParticipants && <ParticipantsUpload bookingId={bookingId} hasList={list.length > 0} />}
+            {list.length > 0 && (
+              <a href={`/bookings/${bookingId}/participants`} className="ds-btn ds-btn-primary">
+                <DownloadIcon size={16} /> Download CSV
+              </a>
+            )}
+          </div>
         </div>
         {list.length === 0 ? (
-          <p className="border-t border-ds-border px-5 py-6 text-sm text-ds-text sm:px-6">No participants on this deal.</p>
+          <p className="border-t border-ds-border px-5 py-6 text-sm text-ds-text sm:px-6">
+            No participant list yet. {canEditParticipants ? "It's optional: upload it here when the client sends it, and the content team is told." : "It's optional and can be added later."}
+          </p>
         ) : (
           // A table on wide cards; on narrow ones each participant stacks into a block, so nothing scrolls sideways.
           <div role="table" aria-label="Participants" className="max-h-[32rem] overflow-y-auto border-t border-ds-border">

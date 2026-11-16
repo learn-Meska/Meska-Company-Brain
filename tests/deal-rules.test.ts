@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  clashingDays,
   contactError,
   dayError,
   dealTotal,
@@ -29,7 +30,11 @@ const USER = "11111111-1111-4111-8111-111111111111";
 const INDUSTRY = "22222222-2222-4222-8222-222222222222";
 const TODAY = "2026-11-01";
 
-const growth = { role: "growth", userId: USER, today: TODAY };
+const TRAINER = "33333333-3333-4333-8333-333333333333";
+
+// Growth never picks a trainer; the booking team (te.assign) may.
+const growth = { canAssign: false, userId: USER, today: TODAY };
+const team = { ...growth, canAssign: true };
 
 describe("participants template (golden)", () => {
   it("is exactly the file Growth downloads", async () => {
@@ -78,7 +83,8 @@ describe("participants CSV parsing", () => {
     ]);
   });
   it("server re-check refuses anything the browser could have tampered with", () => {
-    expect(participantsError([])).toMatch(/Upload the participants/);
+    // the audience is optional: no list is fine, a list that isn't a list is not
+    expect(participantsError([])).toBeNull();
     expect(participantsError("x")).toMatch(/Upload the participants/);
     expect(participantsError([{ name: "  " }])).toMatch(/name is missing/);
     expect(participantsError([{ name: "A", title: 5 }])).toMatch(/not valid/);
@@ -154,11 +160,32 @@ describe("client contact and days (unchanged main-flow rules)", () => {
 
 describe("requestError: the whole New deal, step by step", () => {
   it("a complete Growth deal passes", () => expect(requestError(validRequest(), growth)).toBeNull());
-  it("booking managers may leave the trainer for later; Growth may not", () => {
-    const noTrainer = validRequest({ days: [{ ...validRequest().days[0], trainer_id: undefined }] });
-    expect(requestError(noTrainer, growth)).toBe("Choose a trainer for Day 1.");
-    expect(requestError(noTrainer, { ...growth, role: "approver" })).toBeNull();
-    expect(requestError(noTrainer, { ...growth, role: "admin" })).toBeNull();
+  it("Growth never picks the trainer; the booking team may pick one or leave it for later", () => {
+    const picked = validRequest({ days: [{ ...validRequest().days[0], trainer_id: TRAINER }] });
+    expect(requestError(picked, growth)).toBe("Training Excellence assigns the trainer. Send Day 1 without one.");
+    expect(requestError(picked, team)).toBeNull();
+    expect(requestError(validRequest(), team)).toBeNull();
+  });
+  it("the audience is optional", () => {
+    expect(requestError(validRequest({ participants: [] }), growth)).toBeNull();
+    expect(requestError(validRequest({ participants: undefined as never }), growth)).toBeNull();
+  });
+  it("a day today is refused once its start time has passed", () => {
+    const today = validRequest({ days: [{ ...validRequest().days[0], date: TODAY }] });
+    expect(requestError(today, { ...growth, nowTime: "09:59" })).toBeNull();
+    expect(requestError(today, { ...growth, nowTime: "10:00" })).toBe("Day 1: that start time has already passed today.");
+    // other dates don't look at the clock
+    expect(requestError(validRequest(), { ...growth, nowTime: "23:00" })).toBeNull();
+  });
+  it("same trainer for all days can't hold when two days share a date and slot", () => {
+    const day = validRequest().days[0];
+    const two = [day, { ...day, day_number: 2, start: "11:00", end: "16:00" }];
+    expect(clashingDays(two)).toEqual([1, 2]);
+    expect(clashingDays([day, { ...day, day_number: 2, start: "18:00", end: "22:00" }])).toBeNull();
+    expect(clashingDays([day, { ...day, day_number: 2, date: "2026-11-11" }])).toBeNull();
+    expect(requestError(validRequest({ deal_days: 2, days: two, same_trainer: true }), growth)).toMatch(/Day 1 and Day 2 are at the same time/);
+    // two groups on the same morning with different trainers is a valid deal
+    expect(requestError(validRequest({ deal_days: 2, days: two, same_trainer: false }), growth)).toBeNull();
   });
   it.each<[string, Partial<NewRequest>, RegExp]>([
     ["company name", { company_name: "  " }, /company name/],
@@ -166,7 +193,7 @@ describe("requestError: the whole New deal, step by step", () => {
     ["industry", { industry_id: "" }, /industry/],
     ["industry id format", { industry_id: "not-a-uuid" }, /industry/],
     ["contact", { contact: { name: "A", email: "x", mobile: "0100000000" } }, /email/],
-    ["participants", { participants: [] }, /participants file/],
+    ["participants", { participants: "x" as never }, /participants file/],
     ["proposal", { proposal: undefined as never }, /Upload the training outline/],
     ["someone else's proposal", { proposal: { path: "999/x.pdf", name: "x.pdf", size: 1 } }, /again/],
     ["value", { value_per_day: 0 }, /value per training day/],
@@ -196,7 +223,9 @@ describe("requestError: the whole New deal, step by step", () => {
     expect(requestError(allBad, growth)).toBe("Enter the company name.");
     expect(requestError({ ...allBad, company_name: "C" }, growth)).toBe("Enter the program name.");
     expect(requestError({ ...allBad, company_name: "C", program_name: "P" }, growth)).toBe("Pick the industry.");
-    expect(requestError({ ...allBad, company_name: "C", program_name: "P", industry_id: INDUSTRY }, growth)).toMatch(/participants file/);
+    // the audience is optional, so an empty list passes and the next step (the value) is reported
+    expect(requestError({ ...allBad, company_name: "C", program_name: "P", industry_id: INDUSTRY }, growth)).toMatch(/value per training day/);
+    expect(requestError({ ...allBad, company_name: "C", program_name: "P", industry_id: INDUSTRY, participants: "x" as never }, growth)).toMatch(/participants file/);
   });
   it("per-day content is no longer asked for", () => {
     expect(validRequest().days[0]).not.toHaveProperty("content");

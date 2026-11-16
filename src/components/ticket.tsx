@@ -6,7 +6,7 @@ import { FeedbackDialog } from "@/components/feedback-dialog";
 import { FeedbackResults } from "@/components/feedback-results";
 import { DeliveryReportCard } from "@/components/delivery-report";
 import { BuildingIcon, CalendarIcon, CheckIcon, DownloadIcon, LayersIcon, PenIcon, UsersIcon } from "@/components/icons";
-import { asDeliveryReport } from "@/lib/delivery";
+import { asDeliveryReport, deliveryState } from "@/lib/delivery";
 import { StatusBadge } from "@/components/status";
 import { db } from "@/lib/supabase";
 import { feedbackAlwaysOpen, takesFeedback } from "@/lib/feedback-mode";
@@ -60,7 +60,11 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
   const briefFiles = all.filter((m) => m.kind === "brief");
   const hideProgram = trainerView && !programVisible(b);
   const cairoToday = new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
-  const briefOpen = b.status === "confirmed" && b.date <= cairoToday;
+  // "Mark as delivered" opens when the session starts; before that the trainer is told when it will.
+  const delivery = deliveryState(b);
+  const briefOpen = delivery === "ready" || delivery === "done";
+  const startsLabel = `${fmtDate(b.date, { weekday: "short", day: "numeric", month: "short" })}, ${fmtTime(b.start_time)}`;
+  const deliveryFiles = briefFiles.map((m) => ({ id: m.id, file_name: m.file_name, audio: isAudioPath(m.file_path) }));
   const win = feedbackWindow(b);
   const alwaysOpen = await feedbackAlwaysOpen();
   const qr = takesFeedback(b.status);
@@ -148,6 +152,22 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
 
         {(active || qr) && (
           <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-ds-border pt-5">
+            {trainerView && briefOpen && (
+              <DeliveryDialog
+                bookingId={b.id}
+                dayNumber={b.day_number}
+                expected={deal?.participants || null}
+                report={asDeliveryReport(b.delivery_report)}
+                brief={b.brief ?? ""}
+                finished={!!b.finished_at}
+                files={deliveryFiles}
+              />
+            )}
+            {trainerView && delivery === "not_yet" && (
+              <span className="inline-flex items-center gap-2 rounded-xl border border-dashed border-ds-border bg-ds-subtle/60 px-3.5 py-2 text-sm text-ds-text" title="You can mark this day as delivered once the session starts">
+                <CheckIcon size={16} /> Mark as delivered <span className="text-xs">· opens {startsLabel}</span>
+              </span>
+            )}
             {qr && (
               <a href={`/bookings/${b.id}/qr`} className="ds-btn ds-btn-primary">
                 <DownloadIcon size={16} /> Feedback QR code
@@ -232,38 +252,27 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
           )}
 
           {/* Delivery report */}
-          {(trainerView ? briefOpen : b.status === "confirmed") && (
-            <Panel
-              icon={<CheckIcon size={16} />}
-              title="Delivery report"
-              action={
-                <div className="flex flex-wrap items-center gap-2">
-                  {b.finished_at && <span className="badge bg-good-bg text-good">Delivered</span>}
-                  {trainerView && (
-                    <DeliveryDialog
-                      bookingId={b.id}
-                      dayNumber={b.day_number}
-                      expected={deal?.participants || null}
-                      report={asDeliveryReport(b.delivery_report)}
-                      brief={b.brief ?? ""}
-                      finished={!!b.finished_at}
-                      files={briefFiles.map((m) => ({ id: m.id, file_name: m.file_name, audio: isAudioPath(m.file_path) }))}
-                    />
-                  )}
-                </div>
-              }
-            >
+          {(trainerView ? delivery !== "none" : b.status === "confirmed") && (
+            <Panel icon={<CheckIcon size={16} />} title="Delivery report" action={b.finished_at ? <span className="badge bg-good-bg text-good">Delivered</span> : undefined}>
               {b.finished_at || b.brief || briefFiles.length > 0 ? (
                 <DeliveryReportCard
                   report={b.delivery_report}
                   brief={b.brief}
                   submittedAt={b.brief_submitted_at}
                   expected={deal?.participants || null}
-                  files={briefFiles.map((m) => ({ id: m.id, file_name: m.file_name, audio: isAudioPath(m.file_path) }))}
+                  files={deliveryFiles}
                 />
               ) : (
                 <p className="text-sm text-ds-text">
-                  {trainerView ? "When the day is done, mark it as delivered with a short report and the audio." : briefOpen ? "The trainer hasn't marked this day as delivered yet." : "The trainer can send the report once the training day starts."}
+                  {!trainerView
+                    ? briefOpen
+                      ? "The trainer hasn't marked this day as delivered yet."
+                      : "The trainer can send the report once the training day starts."
+                    : delivery === "confirm_first"
+                      ? "Confirm this training first (at the top of this page). After the session, you mark it as delivered here with a short report."
+                      : delivery === "not_yet"
+                        ? `After the session, press “Mark as delivered” at the top of this page and fill in a short report. The button opens on ${startsLabel}.`
+                        : "The session has started. When it's done, press “Mark as delivered” at the top of this page and fill in a short report (the audio is optional)."}
                 </p>
               )}
             </Panel>

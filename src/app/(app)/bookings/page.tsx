@@ -9,6 +9,7 @@ import { buildTrainings, CONFIRMATION_FILTERS, CONTENT_LABEL, confirmationFilter
 import { isAudioPath } from "@/lib/files";
 import { isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
+import { openChangeRequests } from "@/lib/change-requests";
 
 const TILES: Stage[] = ["needs_trainer", "waiting_trainer", "scheduled", "in_delivery", "report_due", "delivered", "cancelled"];
 const DAY_SELECT =
@@ -43,6 +44,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
     fetchAll<{ booking_id: string; file_path: string }>((from, to) => db().from("booking_materials").select("booking_id, file_path").eq("kind", "brief").order("id").range(from, to)),
     fetchAll<{ id: string; full_name: string }>((from, to) => db().from("app_users").select("id, full_name").order("id").range(from, to)),
   ]);
+  const changeRequests = await openChangeRequests();
   const title = { all: "All bookings", team: "Team bookings", own: "My bookings" }[scope];
   const failed = [days, deals, files, feedback, audio, users].find((r) => r.error);
   if (failed) {
@@ -63,6 +65,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
     audioBookingIds: audio.data.filter((a) => isAudioPath(a.file_path)).map((a) => a.booking_id),
     names: new Map(users.data.map((u) => [u.id, u.full_name])),
     today: todayISO(),
+    changeRequests,
   });
 
   const requesters = new Map<string, string>();

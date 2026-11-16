@@ -46,7 +46,13 @@ export function todayISO() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
 }
 
-export const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th"}`;
+// The time now in Cairo as "HH:MM" (24-hour), comparable with a booking's start time.
+export function nowTimeCairo() {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+  return `${p.find((x) => x.type === "hour")!.value}:${p.find((x) => x.type === "minute")!.value}`;
+}
+
+export const ordinal =(n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th"}`;
 // The monthly availability deadline as a usable day (1–28), whatever is stored in settings.
 export const deadlineDay = (v: unknown) => Math.min(28, Math.max(1, Math.round(Number(v)) || 25));
 
@@ -73,6 +79,10 @@ export function friendlyError(msg: string | undefined) {
 }
 
 export const AUDIT_LABEL: Record<string, string> = {
+  participants_updated: "Participant list added or replaced",
+  change_requested: "Change requested (Growth)",
+  change_request_resolved: "Change request answered",
+  change_request_withdrawn: "Change request withdrawn",
   team_feedback_added: "Team feedback added",
   team_feedback_deleted: "Team feedback removed",
   booking_created: "Trainer booked",

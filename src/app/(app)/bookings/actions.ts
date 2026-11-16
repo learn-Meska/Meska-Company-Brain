@@ -8,15 +8,17 @@ import { can, requireAccess, requireRole, requireTrainer, requireUser, type Curr
 import { db } from "@/lib/supabase";
 import { esc, siteUrl } from "@/lib/email";
 import { trainingIcs } from "@/lib/ics";
-import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, slotsFor, todayISO, trainerTitle } from "@/lib/format";
+import { cairoStart, fmtDate, fmtTime, friendlyError, isUuid, nowTimeCairo, slotsFor, todayISO, trainerTitle } from "@/lib/format";
+import { assignableTrainers } from "@/lib/availability";
 import { searchTrainers } from "@/lib/search";
 import { getSetting } from "@/lib/scoring";
 import { checkAudioFile, checkFile, isAudioPath, safeName } from "@/lib/files";
 import { audit, BOOKING_SELECT, bookingRows, notify, stepFor, trainerRecipient, userById, usersWithRoles, type BookingRow } from "@/lib/notify";
 import { trainingTeam } from "@/lib/team";
-import { ENGAGEMENT_LABEL, readDeliveryReport, type DeliveryInput } from "@/lib/delivery";
+import { deliveryOpen, ENGAGEMENT_LABEL, readDeliveryReport, type DeliveryInput } from "@/lib/delivery";
 import { FEEDBACK_SOURCE_LABEL, FEEDBACK_TEAM_LABEL, mayDeleteFeedback, RATING_LABEL, readTeamFeedback, seesTeamFeedback } from "@/lib/team-feedback";
 import { seesDealOf } from "@/lib/team-people";
+import { settleChangeRequests } from "@/lib/change-requests";
 import {
   contactError,
   contactFields,
@@ -90,9 +92,10 @@ async function freeTrainers(d: { date: string; start: string; end: string }) {
   return r.matches.map((t) => ({ id: t.id, full_name: t.full_name, title: t.title }));
 }
 
-// Request page: the trainers Growth may pick for each day (only names, never the availability calendar).
+// Request page, booking team only: the trainers free on each day. Growth never gets names here; its form asks
+// checkAvailability (src/app/(app)/availability/actions.ts), which answers yes or no.
 export async function requestTrainerOptions(input: { days: { day_number: number; date: string; start: string; end: string }[] }) {
-  await requireAccess("growth.new_deal", "te.assign");
+  await requireAccess("te.assign");
   if (!Array.isArray(input?.days)) return { error: "Add at least one training day." };
   for (const d of input.days) {
     const e = dayError(d);
@@ -114,10 +117,12 @@ export async function createProposalUpload(fileName: string, size: number) {
 
 export async function createRequest(input: NewRequest) {
   const me = await requireAccess("growth.new_deal", "te.assign");
-  const invalid = requestError(input, { role: me.role, userId: me.id, today: todayISO() });
+  const invalid = requestError(input, { canAssign: can(me, "te.assign"), userId: me.id, today: todayISO(), nowTime: nowTimeCairo() });
   if (invalid) return { error: invalid };
-  // A picked trainer must still be free and matching when the request is sent, and the proposal must really be
-  // in storage (the browser uploads it first). All days are checked at once.
+  const participants = input.participants ?? [];
+  // Only the booking team picks a trainer here (Growth's days all go to Training Excellence). A picked trainer
+  // must still be free when the request is sent, and the proposal must really be in storage (the browser
+  // uploads it first). All days are checked at once.
   const picked = input.days.filter((d) => d.trainer_id);
   const [free, { error: missingFile }] = await Promise.all([
     Promise.all(picked.map((d) => freeTrainers(d))),
@@ -147,10 +152,13 @@ export async function createRequest(input: NewRequest) {
   const dealId = (deal as { id: string }).id;
   // Anything that fails after this point removes the deal again (its participants go with it).
   const undo = () => db().from("deals").delete().eq("id", dealId);
-  const { error: partErr } = await db().from("deal_participants").insert(participantRows(dealId, input.participants));
-  if (partErr) {
-    await undo();
-    return { error: friendlyError(partErr.message) };
+  // The audience is optional; it can be uploaded later from the deal.
+  if (participants.length) {
+    const { error: partErr } = await db().from("deal_participants").insert(participantRows(dealId, participants));
+    if (partErr) {
+      await undo();
+      return { error: friendlyError(partErr.message) };
+    }
   }
 
   const batch = input.days.length > 1 ? randomUUID() : null;
@@ -193,12 +201,13 @@ export async function createRequest(input: NewRequest) {
     return { ok: "Request sent. It's on the calendar.", ids };
   }
   const total = dealTotal(valuePerDay, dealDays);
+  const headcount = participants.length ? String(participants.length) : "Not provided yet";
   // The request is saved. Audit, bell and emails run after the answer goes back, so sending through Gmail
   // (about a second per email) never keeps Growth waiting. sendEmail still logs every message to email_outbox.
   after(async () => {
     try {
       for (const b of rows) {
-        await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null, deal: dealId, value_per_day: valuePerDay, days: dealDays, participants: input.participants.length });
+        await audit(me.id, "training_requested", b.id, { program: title(b), trainer: b.trainers?.full_name ?? null, deal: dealId, value_per_day: valuePerDay, days: dealDays, participants: participants.length });
         if (b.trainer_id) await emailAssignment(b);
       }
       const open = rows.filter((b) => !b.trainer_id);
@@ -223,14 +232,16 @@ export async function createRequest(input: NewRequest) {
             ["Client contact", `${esc(input.contact.name)} · ${esc(input.contact.email)} · ${esc(input.contact.mobile)}`],
             ...rows.map((b) => [`Day ${b.day_number}`, `${esc(when(b))}${b.location ? ` · ${esc(b.location)}` : ""} · ${b.trainers ? esc(b.trainers.full_name) : "<i>needs a trainer</i>"}`] as [string, string]),
             ["Industry", esc(rows[0].industry?.name ?? "")],
-            ["Participants", String(input.participants.length)],
+            ["Participants", headcount],
             ["Deal value", `${fmtAmount(valuePerDay)} per day × ${dealDays} ${dealDays === 1 ? "day" : "days"} = <b>${fmtAmount(total)}</b>`],
             ["Training outline", esc(input.proposal.name)],
           ],
           next: [
             ...(open.length ? [`<b>Training Excellence:</b> open the training and assign a trainer to ${open.length === rows.length ? "every day" : `the ${open.length} ${open.length === 1 ? "day" : "days"} without one`}. The trainer is then emailed to confirm.`] : []),
             ...(rows.length > open.length ? ["The chosen trainer was emailed the assignment and asked to confirm. You'll be notified when they answer."] : []),
-            "The content team was asked to prepare the training content from the training outline and the audience.",
+            participants.length
+              ? "The content team was asked to prepare the training content from the training outline and the audience."
+              : "The content team was asked to prepare the training content from the training outline. The participant list wasn't provided yet; it can be uploaded on the deal later.",
           ],
           button: open.length ? "Assign a trainer" : "View the training",
         },
@@ -238,7 +249,7 @@ export async function createRequest(input: NewRequest) {
       // The content team gets the request too: they read the audience and proposal, then write the content.
       await notify(await usersWithRoles("content"), {
         title: `New content request: ${input.company_name.trim()} — ${input.program_name}`,
-        body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the audience and training outline.`,
+        body: `${me.full_name} sent a deal of ${rows.length} ${rows.length === 1 ? "day" : "days"}. Open it to see the ${participants.length ? "audience and training outline" : "training outline"}.`,
         link: `/content/${dealId}`,
         email: {
           subject: `Action needed: prepare content for ${input.company_name.trim()} · ${input.program_name} (first day ${fmtDate(rows[0].date, { day: "numeric", month: "short" })})`,
@@ -249,11 +260,13 @@ export async function createRequest(input: NewRequest) {
             ["Company", esc(input.company_name.trim())],
             ["Program", esc(input.program_name)],
             ["Days", String(rows.length)],
-            ["Participants", String(input.participants.length)],
+            ["Participants", headcount],
             ["First day", esc(fmtDate(rows[0].date))],
           ],
           next: [
-            "Open the request and read the audience (participants) and the training outline.",
+            participants.length
+              ? "Open the request and read the audience (participants) and the training outline."
+              : "Open the request and read the training outline. The participant list wasn't provided yet; you'll be told when it is added.",
             "Write the content guide and upload the files.",
             "Submit the content. The assigned trainer and the team are then notified and can use it.",
           ],
@@ -265,7 +278,8 @@ export async function createRequest(input: NewRequest) {
     }
   });
   refresh();
-  return { ok: "Request sent. It's on the calendar and Training Excellence was notified.", ids: rows.map((b) => b.id) };
+  const sent = rows.some((b) => !b.trainer_id) ? "Request sent. Training Excellence was notified and will assign the trainer." : "Request sent. The trainer was emailed to confirm.";
+  return { ok: sent, ids: rows.map((b) => b.id) };
 }
 
 /* ---------- Assign a trainer to a request ---------- */
@@ -290,7 +304,9 @@ export async function requestCandidates(bookingId: string) {
   });
   const perDay = lists.map((l) => l.matches.map(slim));
   const common = perDay.length > 1 ? perDay[0].filter((t) => perDay.every((list) => list.some((x) => x.id === t.id))) : [];
-  return { days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, start: d.start_time, end: d.end_time, matches: perDay[i] })), common };
+  // otherFree: trainers free at that time who don't fit the request (e.g. another industry). They can't be
+  // assigned here, but the booking team can still pick one from Edit training if it decides to.
+  return { days: days.map((d, i) => ({ id: d.id, day_number: d.day_number, date: d.date, start: d.start_time, end: d.end_time, matches: perDay[i], otherFree: lists[i].unavailableCount })), common };
 }
 
 async function loadBatch(batchId: string) {
@@ -419,6 +435,8 @@ export async function respondBooking(id: string, accept: boolean, comment: strin
           button: "View the training",
         },
   });
+  // A decline takes the trainer off, so a waiting "different trainer" request no longer applies.
+  if (!accept) await settleChangeRequests(b, null);
   refresh();
   return { ok: accept ? "Thank you, the assignment is confirmed." : "Your response was sent." };
 }
@@ -467,15 +485,41 @@ export type EditTrainerOption = {
   week: { date: string; morning: boolean; evening: boolean }[];
 };
 
-// Edit training: the trainers free at the new date and time, with their profile summary and their free slots
-// that week, so the person editing can keep the trainer or pick another one.
-export async function editTrainerOptions(bookingId: string, input: { date: string; start: string; end: string }) {
+function editWhenError(b: BookingRow, input: { date: string; start: string; end: string }) {
+  if (!DATE.test(input?.date ?? "") || !TIME.test(input?.start ?? "") || !TIME.test(input?.end ?? "") || input.end <= input.start) return "Check the date and time.";
+  if (!slotsFor(input.start, input.end).length) return "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM).";
+  if (input.date !== b.date && input.date < todayISO()) return PAST_DATE;
+  return null;
+}
+
+// Edit training, for Growth: whether the assigned trainer can still make the new date and time, and whether
+// another trainer could take it. Yes or no only; Growth never sees who is free.
+export async function editAvailability(bookingId: string, input: { date: string; start: string; end: string }) {
   const me = await requireRole("admin", "approver", "growth");
   const [b] = await loadBookings([bookingId]);
   if (!b || !mayChange(me, b, "te.edit")) return { error: "Booking not found." };
-  if (!DATE.test(input?.date ?? "") || !TIME.test(input?.start ?? "") || !TIME.test(input?.end ?? "") || input.end <= input.start) return { error: "Check the date and time." };
-  if (!slotsFor(input.start, input.end).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
-  if (input.date !== b.date && input.date < todayISO()) return { error: PAST_DATE };
+  const bad = editWhenError(b, input);
+  if (bad) return { error: bad };
+  const when = { date: input.date, start: input.start, end: input.end };
+  const [free, others] = await Promise.all([
+    b.trainer_id ? searchTrainers({ ...when, audienceId: "", functionId: "", industryId: "", skillIds: [], excludeBookingId: b.id }) : null,
+    assignableTrainers(when, b.industry_id, b.id),
+  ]);
+  return {
+    // null when the day has no trainer yet
+    trainerFree: free ? free.matches.some((t) => t.id === b.trainer_id) : null,
+    otherFree: others.some((t) => t.id !== b.trainer_id),
+  };
+}
+
+// Edit training, booking team only: the trainers free at the new date and time, with their profile summary and
+// their free slots that week, so the person editing can keep the trainer or pick another one.
+export async function editTrainerOptions(bookingId: string, input: { date: string; start: string; end: string }) {
+  const me = await requireAccess("te.edit");
+  const [b] = await loadBookings([bookingId]);
+  if (!b || !mayChange(me, b, "te.edit")) return { error: "Booking not found." };
+  const bad = editWhenError(b, input);
+  if (bad) return { error: bad };
   // Same rule as a New deal: availability only (the audience is the participant list).
   const r = await searchTrainers({ date: input.date, start: input.start, end: input.end, audienceId: "", functionId: "", industryId: "", skillIds: [], excludeBookingId: b.id });
   const ids = r.matches.map((t) => t.id);
@@ -532,30 +576,37 @@ export async function editBooking(fd: FormData) {
   if (!slotsFor(next.start_time, next.end_time).length) return { error: "The time must fall within Morning (9 AM – 5 PM) or Evening (6 PM – 11 PM)." };
   if (next.date !== b.date && next.date < todayISO()) return { error: PAST_DATE };
 
-  // The trainer: "keep" (or nothing sent) keeps the current one, "none" leaves the day for Training Excellence,
-  // an id picks a trainer who must be free at the new date and time.
+  // The trainer, for the booking team: "keep" (or nothing sent) keeps the current one, "none" leaves the day to
+  // assign later, an id picks a trainer who must be free at the new date and time.
+  // Growth never picks: the trainer stays, unless they aren't free at the new date and time, in which case the
+  // day goes back to Training Excellence to assign someone.
   const pick = String(fd.get("trainer_id") ?? "keep");
   const growthOnly = !can(me, "te.edit");
   let trainerId: string | null = b.trainer_id;
-  if (pick === "none") {
-    if (growthOnly) return { error: "Choose a trainer for this day." };
-    trainerId = null;
-  } else if (pick !== "keep") {
+  if (growthOnly) {
+    if (pick !== "keep") return { error: "Training Excellence assigns the trainer. To ask for a different one, use “Request a change”." };
+  } else if (pick === "none") trainerId = null;
+  else if (pick !== "keep") {
     if (!isUuid(pick)) return { error: "Choose the trainer again." };
     trainerId = pick;
   }
   const timeChanged = next.date !== b.date || next.start_time.slice(0, 5) !== b.start_time.slice(0, 5) || next.end_time.slice(0, 5) !== b.end_time.slice(0, 5);
-  const trainerChanged = trainerId !== b.trainer_id;
-  if (trainerId && (trainerChanged || timeChanged)) {
+  let released = false;
+  if (trainerId && (trainerId !== b.trainer_id || timeChanged)) {
     const r = await searchTrainers({ date: next.date, start: next.start_time, end: next.end_time, audienceId: "", functionId: "", industryId: "", skillIds: [], excludeBookingId: b.id });
-    if (!r.matches.some((t) => t.id === trainerId))
-      return {
-        error: trainerChanged
-          ? "That trainer isn't free at this date and time any more. Pick another one."
-          : `${b.trainers?.full_name ?? "The trainer"} isn't free at the new date and time. Pick another trainer from the list.`,
-      };
+    if (!r.matches.some((t) => t.id === trainerId)) {
+      if (!growthOnly)
+        return {
+          error:
+            trainerId !== b.trainer_id
+              ? "That trainer isn't free at this date and time any more. Pick another one."
+              : `${b.trainers?.full_name ?? "The trainer"} isn't free at the new date and time. Pick another trainer from the list.`,
+        };
+      trainerId = null;
+      released = true;
+    }
   }
-  if (growthOnly && !trainerId) return { error: "Choose a trainer for this day." };
+  const trainerChanged = trainerId !== b.trainer_id;
 
   const fields: [string, string, string][] = [
     ["Program", b.program_name, next.program_name],
@@ -654,8 +705,10 @@ export async function editBooking(fd: FormData) {
       button: "View the training",
     },
   });
+  if (trainerChanged) await settleChangeRequests(b, me);
   refresh();
   revalidatePath(`/bookings/${id}`);
+  if (released) return { ok: `Saved. ${b.trainers?.full_name ?? "The trainer"} isn't free at the new date and time, so the day went back to Training Excellence to assign a trainer. Everyone was notified.` };
   if (trainerChanged && fresh.trainer_id) return { ok: `Saved. ${newTrainerName} was emailed to confirm, and the team was notified.` };
   if (reconfirm) return { ok: "Saved. The trainer was asked to confirm the new date and time, and the team was notified." };
   return { ok: fresh.trainer_id ? "Saved. The trainer and the team were notified of the changes." : "Saved. The team was notified of the changes." };
@@ -722,6 +775,7 @@ export async function cancelBooking(fd: FormData) {
   const r = await cancelDay(me, b, reason);
   if ("error" in r) return r;
   await notifyCancelled(me, [r]);
+  await settleChangeRequests(b, me);
   refresh();
   revalidatePath(`/bookings/${id}`);
   return { ok: "Cancelled. The trainer and the team were notified, and the reason is in the activity log." };
@@ -954,6 +1008,7 @@ export async function reassignTraining(fd: FormData) {
       },
     });
   }
+  if (released.length) await settleChangeRequests(b, me);
   refreshTraining();
   if (failure) return { error: released.length ? `${released.length} of ${targets.length} days were released. ${failure}` : failure };
   if (!released.length) return { error: "This training changed in the meantime. Refresh the page and try again." };
@@ -984,6 +1039,7 @@ export async function cancelTraining(fd: FormData) {
   }
   // The team hears once about every day that was cancelled, even if a later day stopped the rest.
   await notifyCancelled(me, done);
+  if (done.length) await settleChangeRequests(b, me);
   refreshTraining();
   if (failure) return { error: done.length ? `${done.length} of ${targets.length} days were cancelled. ${failure}` : failure };
   return { ok: "Training cancelled. The trainer and the team were notified, and the reason is in the activity log." };
@@ -996,7 +1052,7 @@ async function ownConfirmedPast(bookingId: string) {
   const [b] = await loadBookings([bookingId]);
   if (!b || b.trainer_id !== me.trainer_id) return { me, error: "Training not found." } as const;
   if (b.status !== "confirmed") return { me, error: "A brief can only be added to a confirmed training." } as const;
-  if (b.date > new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" })) return { me, error: "You can add the brief once the training day has started." } as const;
+  if (!deliveryOpen(b)) return { me, error: "You can mark this day as delivered once the training day has started." } as const;
   return { me, b } as const;
 }
 
@@ -1063,11 +1119,16 @@ export async function submitBrief(bookingId: string, input: DeliveryInput) {
   // Days delivered before audio was required can still update their report without it.
   const now = new Date().toISOString();
   // Submitting the report and audio is what marks the training day as delivered (finished_at).
-  const { error } = await db()
+  const { data: saved, error } = await db()
     .from("bookings")
     .update({ brief: brief || null, delivery_report: report, brief_submitted_at: now, finished_at: r.b.finished_at ?? now })
-    .eq("id", bookingId);
+    .eq("id", bookingId)
+    // only while the day is still this trainer's confirmed training (it may have been cancelled or reassigned meanwhile)
+    .eq("status", "confirmed")
+    .eq("trainer_id", r.me.trainer_id)
+    .select("id");
   if (error) return { error: friendlyError(error.message) };
+  if (!saved?.length) return { error: "This training changed while you were writing the report. Refresh the page and try again." };
   await audit(r.me.id, "brief_submitted", bookingId, { program: title(r.b), attended: report.attended, engagement: report.engagement });
   const label = first ? "Training delivered" : "Delivery report updated";
   await notify(await trainingTeam(r.b, r.me.id), {
@@ -1094,7 +1155,10 @@ export async function submitBrief(bookingId: string, input: DeliveryInput) {
       button: "Read the report",
     },
   });
+  // A delivered training has nothing left to change, so a waiting change request is closed.
+  if (first) await settleChangeRequests(r.b, null);
   revalidatePath(`/me/bookings/${bookingId}`);
+  revalidatePath("/me", "layout");
   revalidatePath(`/bookings/${bookingId}`);
   revalidatePath("/dashboard", "layout");
   return { ok: first ? `Marked as delivered. Thank you, your report${audioCount ? " and audio were" : " was"} sent to the team.` : "Report updated and the team was notified." };

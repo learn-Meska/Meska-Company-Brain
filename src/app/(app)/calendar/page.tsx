@@ -3,6 +3,7 @@ import { can, requireAccess } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 import { todayISO } from "@/lib/format";
+import { growthOwnerIds } from "@/lib/team-people";
 
 export default async function CalendarPage({ searchParams }: PageProps<"/calendar">) {
   const me = await requireAccess("growth.calendar", "te.find", "te.dashboard");
@@ -17,6 +18,10 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
     .order("start_time");
   const picked = typeof trainer === "string" && trainer ? trainer : "";
   if (picked) q = q.eq("trainer_id", picked);
+  // Growth sees the trainings it can open in its bookings list: its own, a team leader's members', or all
+  // for the portal admin. Everyone else sees every training.
+  const owners = await growthOwnerIds(me);
+  if (owners) q = q.in("created_by", owners);
   // With one trainer picked, admins and booking managers see the days they marked available that still have a
   // free slot (today onwards). Growth only sees booked dates.
   const showFree = !!picked && can(me, "te.find");
@@ -24,7 +29,10 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
   const to = grid.cells[grid.cells.length - 1];
   const [{ data }, { data: trainers }, { data: avail }, { data: locks }] = await Promise.all([
     q,
-    db().from("trainers").select("id, full_name").order("full_name"),
+    // scoped Growth logins only get the trainers on their own trainings in the filter
+    owners
+      ? db().from("bookings").select("trainer_id, trainers(id, full_name)").in("created_by", owners).not("trainer_id", "is", null).in("status", ["awaiting_trainer", "confirmed"]).limit(1000)
+      : db().from("trainers").select("id, full_name").order("full_name"),
     showFree ? db().from("availability").select("date, slot").eq("trainer_id", picked).gte("date", from).lte("date", to) : Promise.resolve({ data: [] }),
     showFree ? db().from("booking_locks").select("date, slot").eq("trainer_id", picked).gte("date", from).lte("date", to) : Promise.resolve({ data: [] }),
   ]);
@@ -33,6 +41,9 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
   for (const a of (avail ?? []) as { date: string; slot: string }[]) {
     if (!taken.has(`${a.date}|${a.slot}`)) available.set(a.date, [...(available.get(a.date) ?? []), a.slot].sort().reverse());
   }
+  const trainerOptions = owners
+    ? [...new Map(((trainers ?? []) as unknown as { trainers: { id: string; full_name: string } | null }[]).filter((r) => r.trainers).map((r) => [r.trainers!.id, r.trainers!])).values()].sort((a, b) => a.full_name.localeCompare(b.full_name))
+    : ((trainers ?? []) as { id: string; full_name: string }[]);
   const qs = (mo: string) => `/calendar?m=${mo}${typeof trainer === "string" && trainer ? `&trainer=${trainer}` : ""}`;
   return (
     <MonthCalendar
@@ -47,7 +58,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
           <input type="hidden" name="m" value={grid.month} />
           <select name="trainer" defaultValue={typeof trainer === "string" ? trainer : ""} className="input w-48 py-1.5">
             <option value="">All trainers</option>
-            {((trainers ?? []) as { id: string; full_name: string }[]).map((t) => (
+            {trainerOptions.map((t) => (
               <option key={t.id} value={t.id}>{t.full_name}</option>
             ))}
           </select>

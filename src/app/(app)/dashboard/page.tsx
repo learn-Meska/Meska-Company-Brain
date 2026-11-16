@@ -5,6 +5,7 @@ import { buildTrainings, CONFIRMATION_FILTERS, CONTENT_LABEL, confirmationFilter
 import { isAudioPath } from "@/lib/files";
 import { isUuid, todayISO } from "@/lib/format";
 import { db, fetchAll } from "@/lib/supabase";
+import { openChangeRequests } from "@/lib/change-requests";
 import { TrainingRow } from "@/components/training-row";
 import { AutoSelect } from "@/components/auto-select";
 
@@ -28,6 +29,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     fetchAll<{ booking_id: string; file_path: string }>((from, to) => db().from("booking_materials").select("booking_id, file_path").eq("kind", "brief").order("id").range(from, to)),
     fetchAll<{ id: string; full_name: string }>((from, to) => db().from("app_users").select("id, full_name").order("id").range(from, to)),
   ]);
+  const changeRequests = await openChangeRequests();
   const failed = [days, deals, files, feedback, audio, users].find((r) => r.error);
   if (failed) {
     console.error("[dashboard]", failed.error);
@@ -47,6 +49,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     audioBookingIds: audio.data.filter((a) => isAudioPath(a.file_path)).map((a) => a.booking_id),
     names: new Map(users.data.map((u) => [u.id, u.full_name])),
     today: todayISO(),
+    changeRequests,
   });
 
   const requesters = new Map<string, string>();

@@ -27,7 +27,8 @@ export function TrainingRow({ t, href, showLead = true }: { t: Training; href: s
       <td>{t.content === "none" ? <span className="text-muted">—</span> : <span className={`badge whitespace-nowrap ${CONTENT_STYLE[t.content]}`}>{CONTENT_LABEL[t.content]}</span>}</td>
       <td>
         <span className={`badge whitespace-nowrap ${STAGE_STYLE[t.stage]}`}>{STAGE_LABEL[t.stage]}</span>
-        {t.attention && <div className="mt-1"><span className="badge whitespace-nowrap bg-bad-bg text-bad">Needs attention</span></div>}
+        {t.changeRequest && <div className="mt-1"><span className="badge whitespace-nowrap bg-warn-bg text-warn">Change requested</span></div>}
+        {t.attention && !t.changeRequest && <div className="mt-1"><span className="badge whitespace-nowrap bg-bad-bg text-bad">Needs attention</span></div>}
         {t.started && t.live > 0 && <div className="mt-1 whitespace-nowrap text-xs text-muted">Brief {t.briefs}/{t.live} · Audio {t.audios}/{t.live}</div>}
       </td>
       <td className="text-sm">

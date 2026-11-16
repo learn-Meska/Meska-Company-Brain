@@ -131,7 +131,7 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
           {[
             ["Training days", `${dayRows.length} · ${fmtDate(first.date, { day: "numeric", month: "short" })}${dayRows.length > 1 ? ` – ${fmtDate(last.date, { day: "numeric", month: "short" })}` : ""}`],
-            ["Participants", String(list.length)],
+            ["Participants", list.length ? String(list.length) : "Not provided yet"],
             ["Industry", first.industry?.name ?? "—"],
           ].map(([k, v]) => (
             <div key={k} className="rounded-xl bg-ds-subtle/70 px-4 py-3">
@@ -182,7 +182,7 @@ export default async function ContentRequestPage({ params }: PageProps<"/content
             }
           >
             {list.length === 0 ? (
-              <p className="text-sm text-ds-text">No participant list was attached.</p>
+              <p className="text-sm text-ds-text">No participant list yet. It&apos;s optional: Growth can add it later, and you&apos;ll be notified when they do.</p>
             ) : (
               <>
                 <ul className="space-y-2.5">

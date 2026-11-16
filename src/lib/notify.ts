@@ -23,6 +23,14 @@ export async function userWithRole(id: string | null | undefined, role: string):
   return (data as Recipient | null) ?? null;
 }
 
+// A team member who still has team access (a removed member keeps their row, with no roles).
+export async function staffById(id: string | null | undefined): Promise<Recipient | null> {
+  if (!id) return null;
+  const { data } = await db().from("app_users").select("id, email, full_name, roles").eq("id", id).maybeSingle();
+  const u = data as (Recipient & { roles: string[] | null }) | null;
+  return u && (u.roles ?? []).length ? { id: u.id, email: u.email, full_name: u.full_name } : null;
+}
+
 export async function userById(id: string | null | undefined): Promise<Recipient | null> {
   if (!id) return null;
   const { data } = await db().from("app_users").select("id, email, full_name").eq("id", id).maybeSingle();

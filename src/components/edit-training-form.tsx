@@ -3,40 +3,52 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Form, Submit } from "@/components/form";
-import { editBooking, editTrainerOptions, type EditTrainerOption } from "@/app/(app)/bookings/actions";
+import { editAvailability, editBooking, editTrainerOptions, type EditTrainerOption } from "@/app/(app)/bookings/actions";
+import { AvailabilityChip } from "@/components/availability-chip";
 
 type Booking = { id: string; program_name: string; day_number: number; date: string; start: string; end: string; location: string; content: string };
 
 const WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const dayLabel = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
-// Edit one training day. Whenever the date or time is filled in, the trainers free at that moment are listed with
-// their profile and their free slots that week, so the person editing can keep the trainer or pick another one.
-// Saving runs the usual cycle: a new trainer (or a new date for a confirmed trainer) is asked to confirm, and everyone
-// on the training is notified.
+// Edit one training day.
+// Booking team (pickTrainer): whenever the date or time is filled in, the trainers free at that moment are listed
+// with their profile and their free slots that week, to keep the trainer or pick another one.
+// Growth: no trainer list. It only sees whether the assigned trainer can make the new date and time; if not, the
+// day goes back to Training Excellence to assign someone.
+// Saving runs the usual cycle: a new trainer (or a new date for a confirmed trainer) is asked to confirm, and
+// everyone on the training is notified.
 export function EditTrainingForm({
   b,
   current,
-  trainerRequired,
+  pickTrainer,
   canViewProfiles,
 }: {
   b: Booking;
   current: { id: string; name: string } | null;
-  // Growth must keep a trainer on the day; Training Excellence may leave it to assign later
-  trainerRequired: boolean;
+  pickTrainer: boolean;
   canViewProfiles: boolean;
 }) {
   const router = useRouter();
   const [when, setWhen] = useState({ date: b.date, start: b.start, end: b.end });
-  const [pick, setPick] = useState<string>(current ? "keep" : trainerRequired ? "" : "none");
+  const [pick, setPick] = useState<string>(current || !pickTrainer ? "keep" : "none");
   const [list, setList] = useState<{ key: string; trainers?: EditTrainerOption[]; currentFree?: boolean; error?: string } | null>(null);
+  // Growth: yes or no only
+  const [free, setFree] = useState<{ key: string; trainerFree?: boolean | null; otherFree?: boolean; error?: string } | null>(null);
   const key = `${when.date}|${when.start}|${when.end}`;
   const ready = !!when.date && !!when.start && !!when.end && when.end > when.start;
 
   useEffect(() => {
     if (!ready) return;
     let live = true;
+    const offline = "Couldn't check availability. Check your connection and try again.";
     const t = setTimeout(() => {
+      if (!pickTrainer) {
+        editAvailability(b.id, when)
+          .then((r) => live && setFree("error" in r ? { key, error: r.error } : { key, trainerFree: r.trainerFree, otherFree: r.otherFree }))
+          .catch(() => live && setFree({ key, error: offline }));
+        return;
+      }
       editTrainerOptions(b.id, when)
         .then((r) => {
           if (!live) return;
@@ -45,18 +57,19 @@ export function EditTrainingForm({
             const trainers = r.trainers;
             setList({ key, trainers, currentFree: r.currentFree });
             // a picked trainer who isn't free at the new time can't stay picked
-            setPick((p) => (p === "keep" && !r.currentFree ? (trainerRequired ? "" : "none") : p !== "keep" && p !== "none" && p && !trainers.some((x) => x.id === p) ? "" : p));
+            setPick((p) => (p === "keep" && !r.currentFree ? "none" : p !== "keep" && p !== "none" && p && !trainers.some((x) => x.id === p) ? "" : p));
           }
         })
-        .catch(() => live && setList({ key, error: "Couldn't load the free trainers. Check your connection and try again." }));
+        .catch(() => live && setList({ key, error: offline }));
     }, 350);
     return () => {
       live = false;
       clearTimeout(t);
     };
-  }, [b.id, key, ready, trainerRequired]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [b.id, key, ready, pickTrainer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loaded = list?.key === key ? list : null;
+  const answer = free?.key === key ? free : null;
   const changedTime = when.date !== b.date || when.start !== b.start || when.end !== b.end;
   const others = loaded?.trainers?.filter((t) => !t.current) ?? [];
   const currentRow = loaded?.trainers?.find((t) => t.current) ?? null;
@@ -82,6 +95,34 @@ export function EditTrainingForm({
       </div>
       <div className="sm:col-span-2"><label className="label">Location</label><input name="location" defaultValue={b.location} className="input" /></div>
 
+      {!pickTrainer && (
+        <div className="space-y-2 sm:col-span-2">
+          <label className="label mb-0">Trainer</label>
+          {!ready ? (
+            <p className="text-xs text-muted">Fill in the date and time to check availability.</p>
+          ) : !answer ? (
+            <p className="text-xs text-muted">Checking availability…</p>
+          ) : answer.error ? (
+            <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">{answer.error}</p>
+          ) : current ? (
+            answer.trainerFree ? (
+              <p className="rounded-lg bg-good-bg px-3 py-2 text-xs text-good">
+                <b>{current.name}</b> is free at {changedTime ? "the new" : "this"} date and time{changedTime ? " and stays on the training. They are asked to confirm the change." : "."}
+              </p>
+            ) : (
+              <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">
+                <b>{current.name}</b> isn&apos;t free at this date and time. If you save, they are taken off this day and it goes back to Training Excellence to assign a trainer. {answer.otherFree ? "Another trainer is available then." : "No other trainer is free then either."}
+              </p>
+            )
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <AvailabilityChip available={!!answer.otherFree} />
+              <span className="text-xs text-muted">Training Excellence assigns the trainer.</span>
+            </div>
+          )}
+        </div>
+      )}
+      {pickTrainer && (
       <div className="space-y-2 sm:col-span-2">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <label className="label mb-0">Trainer</label>
@@ -103,7 +144,7 @@ export function EditTrainingForm({
                   <Choice checked={pick === "keep"} onPick={() => setPick("keep")} title={`Keep ${current.name}`} hint="Still free at this date and time." />
                 )
               ) : (
-                <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn"><b>{current.name}</b> isn&apos;t free at this date and time. Choose another trainer{trainerRequired ? "" : " or leave the day to Training Excellence"}.</p>
+                <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn"><b>{current.name}</b> isn&apos;t free at this date and time. Choose another trainer or leave the day to assign later.</p>
               )
             )}
             {others.length > 0 && <div className="pt-1 text-xs font-semibold uppercase tracking-wider text-muted">{current ? "Or switch to" : "Choose a trainer"} ({others.length})</div>}
@@ -113,14 +154,15 @@ export function EditTrainingForm({
               ))}
             </div>
             {!others.length && !(current && loaded.currentFree) && (
-              <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No trainer is free at this date and time. Try another date or time{trainerRequired ? ", or contact Training Excellence" : ""}.</p>
+              <p className="rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn">No trainer is free at this date and time. Try another date or time.</p>
             )}
-            {!trainerRequired && <Choice checked={pick === "none"} onPick={() => setPick("none")} title="Leave to Training Excellence" hint="The day goes back to “Needs a trainer”." />}
+            <Choice checked={pick === "none"} onPick={() => setPick("none")} title="Assign later" hint="The day goes back to “Needs a trainer”." />
           </div>
         )}
         {pick && pick !== "keep" && pick !== "none" && <p className="text-xs text-muted">On save, the new trainer is emailed to confirm{current ? ` and ${current.name} is told they're off this day` : ""}.</p>}
         {pick === "keep" && current && changedTime && <p className="text-xs text-muted">On save, {current.name} is emailed the new date and time and asked to confirm it.</p>}
       </div>
+      )}
 
       <div className="sm:col-span-2"><label className="label">Content</label><textarea name="content" rows={4} defaultValue={b.content} className="input" /></div>
       <div><Submit>Save changes</Submit></div>
