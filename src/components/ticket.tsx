@@ -296,6 +296,8 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
 
         <aside className="space-y-5 lg:sticky lg:top-20">
           {/* Training days */}
+          {/* The trainer moves between their days here; the Meska team picks the day in Edit training. */}
+          {trainerView && (
           <Panel icon={<CalendarIcon size={16} />} title="Training days" meta={`(${days.length})`} flush>
             <ol className="divide-y divide-ds-border">
               {days.map((d) => {
@@ -327,6 +329,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
               })}
             </ol>
           </Panel>
+          )}
 
           {/* Audience */}
           {deal && deal.participants > 0 && (

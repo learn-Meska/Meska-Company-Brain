@@ -11,6 +11,7 @@ import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
 import { getSetting } from "@/lib/scoring";
 import { cancelBooking, updateContact } from "../actions";
 import { EditTrainingForm } from "@/components/edit-training-form";
+import { DayPicker } from "@/components/day-picker";
 import { seesDealOf } from "@/lib/team-people";
 import { TeamFeedbackCard } from "@/components/team-feedback";
 import { seesTeamFeedback } from "@/lib/team-feedback";
@@ -41,6 +42,9 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   const viewer = { role: me.role, canAssign: can(me, "te.assign"), canEdit: can(me, "te.edit"), canCancel: can(me, "te.cancel") };
   const ownRequest = can(me, "growth.new_deal") && b.created_by === me.id;
   const canChange = ACTIVE_STATUSES.includes(b.status) && (can(me, "te.edit") || (ownRequest && ["needs_trainer", "awaiting_trainer"].includes(b.status)));
+  // Growth keeps the Edit training box on a day it can't edit (e.g. confirmed) when the training has other days,
+  // so the "Day to edit" dropdown can take it to one it can.
+  const showEdit = canChange || (ownRequest && days.length > 1);
   const canCancel = ACTIVE_STATUSES.includes(b.status) && (can(me, "te.cancel") || (ownRequest && ["needs_trainer", "awaiting_trainer"].includes(b.status)));
   const { requested } = await searchParams;
   const showReason = me.role === "admin";
@@ -58,28 +62,6 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
         </section>
       )}
       {isNew && <p className="rounded-xl bg-good-bg px-4 py-3 text-sm text-good">Booked. The trainer was emailed and asked to confirm; you&apos;ll be notified when they respond.</p>}
-      {days.length > 1 && (
-        <nav className="card flex flex-wrap items-center gap-2 py-3" aria-label="Days of this training">
-          <span className="mr-1 text-sm font-semibold text-ds-heading">Days of this training</span>
-          {days.map((d) => {
-            const locked = !can(me, "te.edit") && !["needs_trainer", "awaiting_trainer"].includes(d.status);
-            return (
-              <Link
-                key={d.id}
-                href={`/bookings/${d.id}`}
-                aria-current={d.id === b.id ? "page" : undefined}
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${d.id === b.id ? "border-ds-primary bg-ds-primary text-white" : "border-line bg-white text-ds-heading hover:border-ds-primary"}`}
-                title={locked ? "Confirmed by the trainer: ask Training Excellence with Request a change" : undefined}
-              >
-                Day {d.day_number} · {fmtDateShort(d.date)}{locked ? " · confirmed" : ""}
-              </Link>
-            );
-          })}
-        </nav>
-      )}
-      {!canChange && ownRequest && b.status === "confirmed" && (
-        <p className="rounded-xl bg-surface2 px-4 py-3 text-sm text-ds-text">The trainer confirmed this day, so it can&apos;t be edited here. To change its date or time, use <b>Request a change</b> below and Training Excellence will handle it.</p>
-      )}
       <Ticket b={b} canUpload={me.role === "admin" && b.status !== "cancelled"} />
       {b.deal_id && <DealCard dealId={b.deal_id} bookingId={b.id} showValue={can(me, "te.deal_value") || can(me, "growth.deal_value")} canEditParticipants={can(me, "te.edit") || can(me, "growth.new_deal")} />}
 
@@ -101,11 +83,28 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
         </section>
       )}
 
-      {(canChange || canCancel) && (
+      {(showEdit || canCancel) && (
         <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
-          {canChange && (
+          {showEdit && (
           <section className="card" id="edit">
             <h2 className="h2 mb-1">Edit training</h2>
+            {days.length > 1 && (
+              <DayPicker
+                current={b.id}
+                days={days.map((d) => {
+                  const locked = !can(me, "te.edit") && !["needs_trainer", "awaiting_trainer"].includes(d.status);
+                  return { id: d.id, label: `Day ${d.day_number} · ${fmtDateShort(d.date)}${locked ? " · confirmed by the trainer" : ""}` };
+                })}
+              />
+            )}
+            {!canChange ? (
+              <p className="rounded-xl bg-surface2 px-3 py-2 text-sm text-ds-text">
+                {b.status === "confirmed"
+                  ? <>The trainer confirmed this day, so it can&apos;t be edited here. To change its date or time, use <b>Request a change</b> above and Training Excellence will handle it.</>
+                  : "This day can't be edited any more."}
+              </p>
+            ) : (
+            <>
             <p className="mb-3 text-xs text-muted">
               {can(me, "te.edit")
                 ? "Change the date or time and pick from the trainers free then. A new trainer, or a new date for a confirmed trainer, is asked to confirm, and everyone on the training is notified of what changed."
@@ -118,6 +117,8 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
               pickTrainer={can(me, "te.edit")}
               canViewProfiles={can(me, "te.trainers") || can(me, "te.find") || can(me, "te.assign")}
             />
+            </>
+            )}
           </section>
           )}
           {canCancel && (
