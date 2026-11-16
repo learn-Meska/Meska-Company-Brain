@@ -26,7 +26,7 @@ export async function ensureAuthUser(email: string) {
 
 export async function sendInvite(email: string, name: string, roleText: string) {
   const link = await accessLink(email, "recovery");
-  await sendEmail(
+  return sendEmail(
     email,
     "You're invited to Meska Company Brain",
     emailLayout({
