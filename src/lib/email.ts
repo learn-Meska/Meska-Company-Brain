@@ -128,6 +128,8 @@ export function emailLayout(opts: {
   intro: string;
   rows?: EmailRow[];
   content?: string;
+  // the label above `content` (default "Content to be delivered")
+  contentLabel?: string;
   extra?: string;
   // what happens next / what the reader needs to do (HTML allowed; callers escape their data)
   next?: string[];
@@ -153,7 +155,7 @@ ${opts.heading ? `<div style="margin:0 0 10px;font-size:18px;font-weight:700;col
 <p style="margin:0 0 12px;font-size:15px">${esc(opts.greeting)}</p>
 <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#33415C">${opts.intro}</p>
 ${rows ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E1E7F1;border-radius:10px;border-collapse:separate;margin-bottom:18px">${rows}</table>` : ""}
-${opts.content ? `<div style="background:linear-gradient(120deg,#EFF6FF,#DBEAFE);border-left:4px solid #2563EB;border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:18px"><div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#2563EB;font-weight:600;margin-bottom:6px">Content to be delivered</div><div style="font-size:14px;line-height:1.65;white-space:pre-wrap">${esc(opts.content)}</div></div>` : ""}
+${opts.content ? `<div style="background:linear-gradient(120deg,#EFF6FF,#DBEAFE);border-left:4px solid #2563EB;border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:18px"><div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#2563EB;font-weight:600;margin-bottom:6px">${esc(opts.contentLabel ?? "Content to be delivered")}</div><div style="font-size:14px;line-height:1.65;white-space:pre-wrap">${esc(opts.content)}</div></div>` : ""}
 ${opts.extra ?? ""}
 ${opts.next?.length ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:12px 16px;margin-bottom:18px"><div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#92400E;font-weight:700;margin-bottom:6px">What happens next</div><ul style="margin:0;padding-left:18px;font-size:13.5px;line-height:1.6;color:#33415C">${opts.next.map((n) => `<li style="margin:2px 0">${n}</li>`).join("")}</ul></div>` : ""}
 ${opts.button ? `<p style="margin:6px 0 18px"><a href="${opts.button.url}" style="display:inline-block;background:#2563EB;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px">${esc(opts.button.label)}</a></p>` : ""}

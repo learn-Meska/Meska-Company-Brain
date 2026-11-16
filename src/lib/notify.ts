@@ -45,6 +45,7 @@ export type NotifyEmail = {
   intro: string;
   rows?: EmailRow[];
   content?: string;
+  contentLabel?: string;
   extra?: string;
   next?: string[];
   button?: string;
@@ -81,6 +82,7 @@ export async function notify(
             rows: e.rows,
             next: e.next,
             content: e.content,
+            contentLabel: e.contentLabel,
             extra: e.extra,
             button: n.link ? { label: e.button ?? "Open in the system", url: siteUrl() + n.link } : undefined,
           }),

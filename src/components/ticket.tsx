@@ -319,7 +319,7 @@ export async function Ticket({ b, canUpload, trainerView = false }: { b: Booking
                         {fmtTime(d.start_time)} – {fmtTime(d.end_time)}
                         {d.location && !/^https?:\/\//.test(d.location) ? ` · ${d.location}` : d.location ? " · Online" : ""}
                       </div>
-                      {!mine && <div className="text-xs text-ds-text">Another trainer</div>}
+                      {!mine && <div className="text-xs text-ds-text">{d.trainer_id ? "Another trainer" : "Trainer not assigned yet"}</div>}
                     </div>
                   </div>
                 );
