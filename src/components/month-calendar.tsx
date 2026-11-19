@@ -18,14 +18,19 @@ export function monthGrid(m: unknown) {
   const [y, mm] = month.split("-").map(Number);
   const first = new Date(Date.UTC(y, mm - 1, 1));
   const lead = first.getUTCDay();
-  const gridStart = new Date(Date.UTC(y, mm - 1, 1 - lead));
-  const weeks = Math.ceil((lead + new Date(Date.UTC(y, mm, 0)).getUTCDate()) / 7);
-  const cells = Array.from({ length: weeks * 7 }, (_, i) => new Date(gridStart.getTime() + i * 86400000).toISOString().slice(0, 10));
+  const count = new Date(Date.UTC(y, mm, 0)).getUTCDate();
+  // Only this month's days: the weekday columns before the 1st and after the last day stay empty.
+  const days = Array.from({ length: count }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`);
+  const weeks = Math.ceil((lead + count) / 7);
+  const cells: (string | null)[] = Array.from({ length: weeks * 7 }, (_, i) => days[i - lead] ?? null);
   return {
     month,
     y,
     mm,
     first,
+    days,
+    from: days[0],
+    to: days[count - 1],
     cells,
     prev: new Date(Date.UTC(y, mm - 2, 1)).toISOString().slice(0, 7),
     next: new Date(Date.UTC(y, mm, 1)).toISOString().slice(0, 7),
@@ -42,6 +47,7 @@ export function MonthCalendar({
   toolbar,
   qs,
   available,
+  tag,
 }: {
   grid: ReturnType<typeof monthGrid>;
   bookings: BookingRow[];
@@ -52,6 +58,8 @@ export function MonthCalendar({
   qs: (month: string) => string;
   // date -> free slots, shown in green when a single trainer is picked
   available?: Map<string, string[]>;
+  // a small label on each card, e.g. the deal's segment (B2B)
+  tag?: (b: BookingRow) => string | undefined;
 }) {
   const byDay = new Map<string, BookingRow[]>();
   for (const b of bookings) byDay.set(b.date, [...(byDay.get(b.date) ?? []), b]);
@@ -88,14 +96,14 @@ export function MonthCalendar({
             <div key={d} className="bg-[#C9D5FB] py-2.5 text-center text-base font-bold text-navy">{d}</div>
           ))}
           {grid.cells.map((date, i) => {
-            const inMonth = date.slice(0, 7) === grid.month;
+            if (!date) return <div key={`empty-${i}`} aria-hidden className="min-h-36 bg-[#F4F5F7]" />;
             const dow = i % 7;
             const items = byDay.get(date) ?? [];
             const free = available?.get(date);
             return (
-              <div key={date} className={`min-h-36 p-2 ${free ? "bg-[#DDF5E7]" : inMonth ? "bg-white" : "bg-[#EDEEF1]"} ${date === today ? "ring-2 ring-inset ring-blue" : ""}`}>
+              <div key={date} className={`min-h-36 p-2 ${free ? "bg-[#DDF5E7]" : "bg-white"} ${date === today ? "ring-2 ring-inset ring-blue" : ""}`}>
                 <div className="mb-1 flex items-start justify-between gap-1">
-                  <span className={`text-2xl font-bold ${!inMonth ? "text-faint" : dow === 0 ? "text-[#F0567A]" : dow === 6 ? "text-[#4CC3F0]" : "text-ink"}`}>{Number(date.slice(8))}</span>
+                  <span className={`text-2xl font-bold ${dow === 0 ? "text-[#F0567A]" : dow === 6 ? "text-[#4CC3F0]" : "text-ink"}`}>{Number(date.slice(8))}</span>
                   {free && (
                     <span className="rounded-full bg-[#1F9D5B] px-1.5 py-0.5 text-[10px] font-semibold text-white" title="Marked available, not booked yet">
                       {free.map((s) => (s === "morning" ? "Morning" : "Evening")).join(" + ")}
@@ -109,6 +117,7 @@ export function MonthCalendar({
                       href={href(b)}
                       className={`block rounded-sm border px-1.5 py-1 text-center text-[10.5px] leading-tight shadow-[1px_2px_3px_rgba(0,0,0,.12)] transition hover:-translate-y-0.5 ${noteFor(b)}`}
                     >
+                      {tag?.(b) && <div className="mb-0.5"><span className="rounded-full bg-navy px-1.5 py-px text-[9px] font-bold tracking-wide text-white">{tag(b)}</span></div>}
                       <div className="font-semibold">
                         {title(b)}
                         {b.finished_at && <span title="Training delivered"> ✓</span>}

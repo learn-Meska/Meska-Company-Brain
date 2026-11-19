@@ -137,6 +137,7 @@ export async function createRequest(input: NewRequest) {
   const programName = input.program_name.trim();
   const valuePerDay = Number(input.value_per_day);
   const dealDays = Number(input.deal_days);
+  // deals.segment defaults to 'b2b': every deal Growth sends from New deal is a B2B deal.
   const { data: deal, error: dealErr } = await db()
     .from("deals")
     .insert({
