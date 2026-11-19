@@ -69,6 +69,7 @@
     "proposal_path",
     "proposal_name",
     "proposal_size",
+    "segment",
     "created_by",
     "created_at"
   ],

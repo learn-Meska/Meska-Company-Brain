@@ -13,8 +13,8 @@ export default async function MyCalendarPage({ searchParams }: PageProps<"/me/ca
     .select(BOOKING_SELECT)
     .eq("trainer_id", me.trainer_id)
     .in("status", ["awaiting_trainer", "confirmed"])
-    .gte("date", grid.cells[0])
-    .lte("date", grid.cells[grid.cells.length - 1])
+    .gte("date", grid.from)
+    .lte("date", grid.to)
     .order("start_time");
   return (
     <MonthCalendar
