@@ -1,4 +1,4 @@
-import { MonthCalendar, monthGrid } from "@/components/month-calendar";
+import { B2C_CARD_SELECT, MonthCalendar, monthGrid, type B2CCard } from "@/components/month-calendar";
 import { ParamSelect } from "@/components/calendar-filters";
 import { can, requireAccess } from "@/lib/auth";
 import { db } from "@/lib/supabase";
@@ -46,6 +46,15 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
   const segmentOfDeal = new Map(((deals ?? []) as { id: string; segment: string | null }[]).map((d) => [d.id, d.segment]));
   const segmentFor = (b: BookingRow) => segmentOf(b.deal_id ? segmentOfDeal.get(b.deal_id) : null);
   const shown = seg ? rows.filter((b) => segmentFor(b) === seg) : rows;
+  // B2C sessions uploaded by admins on /admin/b2c. They have no Growth owner, so scoped Growth logins don't see them.
+  let sessions: B2CCard[] = [];
+  if (seg !== "b2b" && !owners) {
+    let sq = db().from("b2c_sessions").select(B2C_CARD_SELECT).gte("date", grid.from).lte("date", grid.to).neq("status", "cancelled").order("start_time");
+    if (picked) sq = sq.eq("trainer_id", picked);
+    const { data: b2c, error: b2cErr } = await sq;
+    if (b2cErr) console.error("[calendar] b2c_sessions", b2cErr.message);
+    sessions = (b2c ?? []) as B2CCard[];
+  }
   const taken = new Set(((locks ?? []) as { date: string; slot: string }[]).map((l) => `${l.date}|${l.slot}`));
   const available = new Map<string, string[]>();
   for (const a of (avail ?? []) as { date: string; slot: string }[]) {
@@ -68,7 +77,8 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
       available={showFree ? available : undefined}
       path="/calendar"
       params={params}
-      notice={seg && !shown.length ? `No ${SEGMENT_LABEL[seg]} trainings in ${grid.first.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}.` : undefined}
+      sessions={sessions}
+      notice={seg && !shown.length && !sessions.length ? `No ${SEGMENT_LABEL[seg]} trainings in ${grid.first.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}.` : undefined}
       toolbar={
         <>
           <ParamSelect

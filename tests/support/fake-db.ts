@@ -3,7 +3,7 @@
 
 type Row = Record<string, unknown>;
 type Result = { data: unknown; error: { message: string } | null; count?: number };
-export type Write = { table: string; op: "insert" | "update" | "delete"; payload?: unknown; filters: [string, string, unknown][] };
+export type Write = { table: string; op: "insert" | "update" | "delete" | "upsert"; payload?: unknown; filters: [string, string, unknown][] };
 
 // Deterministic UUIDs, so snapshots stay stable: 00000000-0000-4000-8000-000000000001, …
 export const fakeId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -19,7 +19,8 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
   const rows = (t: string) => (tables[t] ??= []);
 
   class Query implements PromiseLike<Result> {
-    private op: "select" | "insert" | "update" | "delete" = "select";
+    private op: "select" | "insert" | "update" | "delete" | "upsert" = "select";
+    private conflict: string[] = [];
     private payload: unknown;
     private filters: [string, string, unknown][] = [];
     private one: "single" | "maybe" | null = null;
@@ -32,6 +33,21 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
     insert(p: unknown) {
       this.op = "insert";
       this.payload = p;
+      return this;
+    }
+    // ON CONFLICT (onConflict columns) DO UPDATE
+    upsert(p: unknown, opts: { onConflict?: string } = {}) {
+      this.op = "upsert";
+      this.payload = p;
+      this.conflict = (opts.onConflict ?? "id").split(",").map((c) => c.trim());
+      return this;
+    }
+    gte(k: string, v: unknown) {
+      this.filters.push(["gte", k, v]);
+      return this;
+    }
+    lte(k: string, v: unknown) {
+      this.filters.push(["lte", k, v]);
       return this;
     }
     update(p: unknown) {
@@ -81,7 +97,7 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
       return this;
     }
     private match(r: Row) {
-      return this.filters.every(([op, k, v]) => (op === "in" ? (v as unknown[]).includes(r[k]) : op === "contains" ? (v as unknown[]).every((x) => ((r[k] as unknown[] | null) ?? []).includes(x)) : op === "is" ? (r[k] ?? null) === v : op === "neq" ? r[k] !== v : r[k] === v));
+      return this.filters.every(([op, k, v]) => (op === "in" ? (v as unknown[]).includes(r[k]) : op === "contains" ? (v as unknown[]).every((x) => ((r[k] as unknown[] | null) ?? []).includes(x)) : op === "is" ? (r[k] ?? null) === v : op === "neq" ? r[k] !== v : op === "gte" ? String(r[k]) >= String(v) : op === "lte" ? String(r[k]) <= String(v) : r[k] === v));
     }
     private exec(): Result {
       const t = this.table;
@@ -97,6 +113,16 @@ export function createFakeDb(seed: { trainers?: Row[]; lookups?: Row[] } = {}) {
         rows(t).push(...saved);
         const out = saved.map((r) => ({ id: r.id }));
         return { data: this.one ? out[0] : this.returning ? out : null, error: null };
+      }
+      if (this.op === "upsert") {
+        writes.push({ table: t, op: "upsert", payload: this.payload, filters: [] });
+        const list = (Array.isArray(this.payload) ? this.payload : [this.payload]) as Row[];
+        for (const r of list) {
+          const hit = rows(t).find((x) => this.conflict.every((c) => x[c] === r[c]));
+          if (hit) Object.assign(hit, r);
+          else rows(t).push({ id: fakeId(next++), ...r });
+        }
+        return { data: null, error: null };
       }
       if (this.op === "delete" || this.op === "update") {
         writes.push({ table: t, op: this.op, payload: this.payload, filters: this.filters });

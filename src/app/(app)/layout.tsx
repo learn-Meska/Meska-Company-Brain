@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (has("te.trainers") || has("te.find") || has("te.assign")) items.push({ href: "/trainers", label: "Trainers" });
     if (has("content.view")) items.push({ href: "/content", label: "Content requests" });
     if (canEditSettings(u)) items.push({ href: "/admin/feedback-form", label: "Feedback form" });
-    if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
+    if (u.role === "admin") items.push({ href: "/admin/settings", label: "Scoring & lists" }, { href: "/admin/users", label: "Team & access" }, { href: "/admin/b2c", label: "Add B2C data" }, { href: "/admin/feedback", label: "Feedback import" }, { href: "/admin/logs", label: "Activity log" });
     else if (canEditSettings(u)) items.push({ href: "/admin/settings", label: "Scoring & lists" });
   }
   // Portal admins manage the people in the portal they're working in; team leaders see their members.

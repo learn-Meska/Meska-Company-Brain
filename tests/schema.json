@@ -73,6 +73,24 @@
     "created_by",
     "created_at"
   ],
+  "b2c_sessions": [
+    "id",
+    "program",
+    "cohort",
+    "format",
+    "day_number",
+    "session",
+    "date",
+    "start_time",
+    "end_time",
+    "location",
+    "trainer_name",
+    "trainer_id",
+    "status",
+    "delivered",
+    "imported_by",
+    "imported_at"
+  ],
   "compensation_lines": [
     "id",
     "trainer_id",

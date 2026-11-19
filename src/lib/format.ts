@@ -79,6 +79,8 @@ export function friendlyError(msg: string | undefined) {
 }
 
 export const AUDIT_LABEL: Record<string, string> = {
+  b2c_imported: "B2C sessions uploaded",
+  b2c_removed: "B2C cohort removed",
   participants_updated: "Participant list added or replaced",
   change_requested: "Change requested (Growth)",
   change_request_resolved: "Change request answered",
