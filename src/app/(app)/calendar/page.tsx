@@ -1,4 +1,5 @@
 import { MonthCalendar, monthGrid } from "@/components/month-calendar";
+import { ParamSelect } from "@/components/calendar-filters";
 import { can, requireAccess } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { BOOKING_SELECT, type BookingRow } from "@/lib/notify";
@@ -53,6 +54,8 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
   const trainerOptions = owners
     ? [...new Map(((trainers ?? []) as unknown as { trainers: { id: string; full_name: string } | null }[]).filter((r) => r.trainers).map((r) => [r.trainers!.id, r.trainers!])).values()].sort((a, b) => a.full_name.localeCompare(b.full_name))
     : ((trainers ?? []) as { id: string; full_name: string }[]);
+  // the filters kept when the month, trainer or deal type changes
+  const params: Record<string, string> = { m: grid.month, ...(picked ? { trainer: picked } : {}), ...(seg ? { segment: seg } : {}) };
   const qs = (mo: string) => `/calendar?m=${mo}${picked ? `&trainer=${encodeURIComponent(picked)}` : ""}${seg ? `&segment=${seg}` : ""}`;
   return (
     <MonthCalendar
@@ -63,23 +66,29 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
       title={(b) => `${b.program_name} - Day ${b.day_number}`}
       qs={qs}
       available={showFree ? available : undefined}
+      path="/calendar"
+      params={params}
+      notice={seg && !shown.length ? `No ${SEGMENT_LABEL[seg]} trainings in ${grid.first.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}.` : undefined}
       toolbar={
-        <form className="flex gap-2" action="/calendar">
-          <input type="hidden" name="m" value={grid.month} />
-          <select name="trainer" defaultValue={typeof trainer === "string" ? trainer : ""} className="input w-48 py-1.5">
-            <option value="">All trainers</option>
-            {trainerOptions.map((t) => (
-              <option key={t.id} value={t.id}>{t.full_name}</option>
-            ))}
-          </select>
-          <select name="segment" defaultValue={seg} className="input w-36 py-1.5" aria-label="Deal type">
-            <option value="">B2B and B2C</option>
-            {SEGMENTS.map((s) => (
-              <option key={s} value={s}>{SEGMENT_LABEL[s]}</option>
-            ))}
-          </select>
-          <button className="btn-ghost btn-sm">Filter</button>
-        </form>
+        <>
+          <ParamSelect
+            path="/calendar"
+            params={params}
+            name="trainer"
+            value={picked}
+            label="Trainer"
+            options={[{ value: "", label: "All trainers" }, ...trainerOptions.map((t) => ({ value: t.id, label: t.full_name }))]}
+          />
+          <ParamSelect
+            path="/calendar"
+            params={params}
+            name="segment"
+            value={seg}
+            label="Deal type"
+            className="w-36"
+            options={[{ value: "", label: "B2B and B2C" }, ...SEGMENTS.map((s) => ({ value: s, label: SEGMENT_LABEL[s] }))]}
+          />
+        </>
       }
     />
   );

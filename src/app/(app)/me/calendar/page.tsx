@@ -24,6 +24,7 @@ export default async function MyCalendarPage({ searchParams }: PageProps<"/me/ca
       title={(b) => trainerTitle(b)}
       showTrainer={false}
       qs={(mo) => `/me/calendar?m=${mo}`}
+      path="/me/calendar"
     />
   );
 }

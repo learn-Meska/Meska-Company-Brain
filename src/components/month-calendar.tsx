@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { fmtTime, isMonth, todayISO } from "@/lib/format";
 import type { BookingRow } from "@/lib/notify";
+import { MonthPicker } from "@/components/calendar-filters";
 
 export const NOTE: Record<string, string> = {
   needs_trainer: "bg-[#FDE2EC] border-[#F4A9C4]",
@@ -46,8 +47,11 @@ export function MonthCalendar({
   showTrainer = true,
   toolbar,
   qs,
+  path,
+  params = {},
   available,
   tag,
+  notice,
 }: {
   grid: ReturnType<typeof monthGrid>;
   bookings: BookingRow[];
@@ -56,10 +60,15 @@ export function MonthCalendar({
   showTrainer?: boolean;
   toolbar?: ReactNode;
   qs: (month: string) => string;
+  // the calendar's path and its other search params, for the month picker
+  path: string;
+  params?: Record<string, string>;
   // date -> free slots, shown in green when a single trainer is picked
   available?: Map<string, string[]>;
   // a small label on each card, e.g. the deal's segment (B2B)
   tag?: (b: BookingRow) => string | undefined;
+  // a line above the board, e.g. why a filter shows nothing
+  notice?: ReactNode;
 }) {
   const byDay = new Map<string, BookingRow[]>();
   for (const b of bookings) byDay.set(b.date, [...(byDay.get(b.date) ?? []), b]);
@@ -77,6 +86,7 @@ export function MonthCalendar({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {toolbar}
+          <MonthPicker path={path} params={params} month={grid.month} thisYear={Number(today.slice(0, 4))} />
           <Link href={qs(grid.prev)} className="btn-ghost btn-sm">← Prev</Link>
           <Link href={qs(today.slice(0, 7))} className="btn-ghost btn-sm">Today</Link>
           <Link href={qs(grid.next)} className="btn-ghost btn-sm">Next →</Link>
@@ -90,6 +100,7 @@ export function MonthCalendar({
         {available && <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded border border-[#86D3A8] bg-[#DDF5E7]" /> Trainer available (free slot)</span>}
         <span>{total} {total === 1 ? "training" : "trainings"} this month</span>
       </div>
+      {notice && <div className="rounded-lg border border-line bg-ice px-4 py-3 text-sm text-ink">{notice}</div>}
       <div className="overflow-x-auto pb-2">
         <div className="grid min-w-[900px] grid-cols-7 overflow-hidden rounded-xl border border-[#B9C3D6] bg-[#B9C3D6] [gap:1px]">
           {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d) => (
