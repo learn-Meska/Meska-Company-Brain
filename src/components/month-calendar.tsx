@@ -3,6 +3,24 @@ import type { ReactNode } from "react";
 import { fmtTime, isMonth, todayISO } from "@/lib/format";
 import type { BookingRow } from "@/lib/notify";
 import { MonthPicker } from "@/components/calendar-filters";
+import { b2cNote, B2C_STATUS, type B2CStatus } from "@/lib/b2c";
+
+// A B2C session uploaded on /admin/b2c (table b2c_sessions), shown beside the bookings.
+export type B2CCard = {
+  id: string;
+  program: string;
+  cohort: string;
+  session: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  location: string | null;
+  trainer_name: string | null;
+  status: B2CStatus;
+  delivered: boolean;
+  format: string;
+};
+export const B2C_CARD_SELECT = "id, program, cohort, session, date, start_time, end_time, location, trainer_name, status, delivered, format";
 
 export const NOTE: Record<string, string> = {
   needs_trainer: "bg-[#FDE2EC] border-[#F4A9C4]",
@@ -52,6 +70,7 @@ export function MonthCalendar({
   available,
   tag,
   notice,
+  sessions = [],
 }: {
   grid: ReturnType<typeof monthGrid>;
   bookings: BookingRow[];
@@ -69,11 +88,15 @@ export function MonthCalendar({
   tag?: (b: BookingRow) => string | undefined;
   // a line above the board, e.g. why a filter shows nothing
   notice?: ReactNode;
+  // B2C sessions on the board (not linked to a booking page)
+  sessions?: B2CCard[];
 }) {
   const byDay = new Map<string, BookingRow[]>();
   for (const b of bookings) byDay.set(b.date, [...(byDay.get(b.date) ?? []), b]);
+  const b2cByDay = new Map<string, B2CCard[]>();
+  for (const x of [...sessions].sort((a, b) => a.start_time.localeCompare(b.start_time))) b2cByDay.set(x.date, [...(b2cByDay.get(x.date) ?? []), x]);
   const today = todayISO();
-  const total = bookings.length;
+  const total = bookings.length + sessions.length;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -110,6 +133,7 @@ export function MonthCalendar({
             if (!date) return <div key={`empty-${i}`} aria-hidden className="min-h-36 bg-[#F4F5F7]" />;
             const dow = i % 7;
             const items = byDay.get(date) ?? [];
+            const b2c = b2cByDay.get(date) ?? [];
             const free = available?.get(date);
             return (
               <div key={date} className={`min-h-36 p-2 ${free ? "bg-[#DDF5E7]" : "bg-white"} ${date === today ? "ring-2 ring-inset ring-blue" : ""}`}>
@@ -137,6 +161,22 @@ export function MonthCalendar({
                       <div><b>Time:</b> {fmtTime(b.start_time)} - {fmtTime(b.end_time)}</div>
                       <div className="truncate"><b>Location:</b> {b.location ?? ""}</div>
                     </Link>
+                  ))}
+                  {b2c.map((x) => (
+                    <div
+                      key={x.id}
+                      title={`B2C · ${x.program} ${x.cohort} · ${B2C_STATUS[x.status]}${x.delivered ? " · delivered" : ""}`}
+                      className={`block rounded-sm border px-1.5 py-1 text-center text-[10.5px] leading-tight shadow-[1px_2px_3px_rgba(0,0,0,.12)] ${NOTE[b2cNote(x)] ?? NOTE.confirmed}`}
+                    >
+                      <div className="mb-0.5"><span className="rounded-full bg-[#7C3AED] px-1.5 py-px text-[9px] font-bold tracking-wide text-white">B2C</span></div>
+                      <div className="font-semibold">
+                        {x.program} {x.cohort} - {x.session}
+                        {x.delivered && <span title="Training delivered"> ✓</span>}
+                      </div>
+                      {showTrainer && <div><b>Trainer:</b> {x.trainer_name ?? <i>needs a trainer</i>}</div>}
+                      <div><b>Time:</b> {fmtTime(x.start_time)} - {fmtTime(x.end_time)}</div>
+                      <div className="truncate"><b>Location:</b> {x.location ?? (x.format === "online" ? "Online" : "")}</div>
+                    </div>
                   ))}
                 </div>
               </div>
