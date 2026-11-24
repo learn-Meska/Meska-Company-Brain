@@ -78,6 +78,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/calenda
       path="/calendar"
       params={params}
       sessions={sessions}
+      b2cQr={can(me, "te.dashboard")}
       notice={seg && !shown.length && !sessions.length ? `No ${SEGMENT_LABEL[seg]} trainings in ${grid.first.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}.` : undefined}
       toolbar={
         <>

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { FeedbackForm } from "@/components/feedback-form";
 import { CalendarIcon, CheckIcon, UsersIcon } from "@/components/icons";
-import { db } from "@/lib/supabase";
+import { findFeedbackTarget } from "@/lib/feedback-target";
 import { feedbackWindow, fmtDate, isFuture, isPast } from "@/lib/format";
 import { feedbackAlwaysOpen, getFeedbackForm, takesFeedback } from "@/lib/feedback-mode";
 
@@ -22,10 +22,8 @@ function Notice({ icon, title, text }: { icon?: ReactNode; title: string; text: 
 // The page participants open from the training's QR code. Public: no sign-in.
 export default async function FeedbackPage({ params }: PageProps<"/f/[token]">) {
   const { token } = await params;
-  const { data } = /^[0-9a-f-]{36}$/i.test(token)
-    ? await db().from("bookings").select("id, status, date, start_time, end_time, day_number, trainers(full_name)").eq("feedback_token", token).maybeSingle()
-    : { data: null };
-  const b = data as unknown as { id: string; status: string; date: string; start_time: string; end_time: string; day_number: number; trainers: { full_name: string } | null } | null;
+  // a booking day (B2B) or an uploaded B2C session
+  const b = await findFeedbackTarget(token);
   const alwaysOpen = await feedbackAlwaysOpen();
   const valid = !!b && takesFeedback(b.status);
 
@@ -59,11 +57,11 @@ export default async function FeedbackPage({ params }: PageProps<"/f/[token]">) 
           {b && valid && (
             <div className="mt-4 flex flex-wrap gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-ds-border bg-ds-surface px-3 py-1 text-xs text-ds-heading">
-                <CalendarIcon size={14} className="text-ds-primary" /> {fmtDate(b.date)} · Day {b.day_number}
+                <CalendarIcon size={14} className="text-ds-primary" /> {fmtDate(b.date)} · {b.label}
               </span>
-              {b.trainers?.full_name && (
+              {b.trainerName && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-ds-border bg-ds-surface px-3 py-1 text-xs text-ds-heading">
-                  <UsersIcon size={14} className="text-ds-primary" /> Trainer: {b.trainers.full_name}
+                  <UsersIcon size={14} className="text-ds-primary" /> Trainer: {b.trainerName}
                 </span>
               )}
             </div>
