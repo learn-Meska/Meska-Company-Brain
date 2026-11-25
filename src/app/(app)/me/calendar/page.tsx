@@ -33,6 +33,7 @@ export default async function MyCalendarPage({ searchParams }: PageProps<"/me/ca
       title={(b) => trainerTitle(b)}
       showTrainer={false}
       sessions={(b2c ?? []) as B2CCard[]}
+      b2cQr
       qs={(mo) => `/me/calendar?m=${mo}`}
       path="/me/calendar"
     />

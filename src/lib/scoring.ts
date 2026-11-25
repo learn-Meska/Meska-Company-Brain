@@ -70,7 +70,7 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
   const tIds = trainers.map((t) => t.id);
   if (!tIds.length) return [];
 
-  const [cats, tiers, ts, tl, scores, feedback, delivered, history, live] = await Promise.all([
+  const [cats, tiers, ts, tl, scores, feedback, delivered, history, live, liveB2C] = await Promise.all([
     sb.from("score_categories").select("*").order("sort"),
     getTiers(),
     fetchAll((f, t) => sb.from("trainer_skills").select("trainer_id, skills(id, name)").in("trainer_id", tIds).order("trainer_id").order("skill_id").range(f, t)),
@@ -81,6 +81,8 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
     fetchAll((f, t) => sb.from("delivered_history").select("trainer_name, total, as_of").order("trainer_name").order("as_of").range(f, t)),
     // feedback collected in this system through the QR code
     fetchAll((f, t) => sb.from("feedback_responses").select("recommend, reason, created_at, bookings!inner(trainer_id)").in("bookings.trainer_id", tIds).order("created_at", { ascending: false }).order("id").range(f, t)),
+    // and through a B2C session's QR code (the trainer the session had when the answer came in)
+    fetchAll((f, t) => sb.from("b2c_feedback_responses").select("recommend, reason, created_at, trainer_id").in("trainer_id", tIds).order("created_at", { ascending: false }).order("id").range(f, t)),
   ]);
   const categories = ((cats.data ?? []) as Category[]).map((c) => ({ ...c, weight: Number(c.weight) }));
 
@@ -102,9 +104,14 @@ export async function getTrainerProfiles(ids?: string[]): Promise<TrainerProfile
     const fb = ((feedback.data ?? []) as { trainer_name: string; responses: number; delivery: number | null }[]).filter(
       (f) => isNamed(f.trainer_name) && f.delivery != null,
     );
-    const mine = ((live.data ?? []) as unknown as { recommend: number | null; reason: string | null; bookings: { trainer_id: string } }[]).filter(
-      (r) => r.bookings.trainer_id === t.id && r.recommend != null,
-    );
+    type Live = { recommend: number | null; reason: string | null; created_at: string };
+    const mine = [
+      ...((live.data ?? []) as unknown as (Live & { bookings: { trainer_id: string } })[]).filter((r) => r.bookings.trainer_id === t.id),
+      ...((liveB2C.data ?? []) as (Live & { trainer_id: string | null })[]).filter((r) => r.trainer_id === t.id),
+    ]
+      .filter((r) => r.recommend != null)
+      // newest first across B2B and B2C, so the latest reasons show
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
     const scorecardResponses = fb.reduce((s, f) => s + f.responses, 0);
     const fbAvg = scorecardResponses ? fb.reduce((s, f) => s + Number(f.delivery) * f.responses, 0) / scorecardResponses : null;
     const trainerNps = nps(mine.map((r) => r.recommend as number));

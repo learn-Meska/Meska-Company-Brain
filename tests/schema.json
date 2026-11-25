@@ -89,7 +89,20 @@
     "status",
     "delivered",
     "imported_by",
-    "imported_at"
+    "imported_at",
+    "feedback_token"
+  ],
+  "b2c_feedback_responses": [
+    "id",
+    "b2c_session_id",
+    "trainer_id",
+    "recommend",
+    "reason",
+    "told_objectives",
+    "practised",
+    "ai_safety",
+    "answers",
+    "created_at"
   ],
   "compensation_lines": [
     "id",

@@ -4,6 +4,7 @@ import { fmtTime, isMonth, todayISO } from "@/lib/format";
 import type { BookingRow } from "@/lib/notify";
 import { MonthPicker } from "@/components/calendar-filters";
 import { b2cNote, B2C_STATUS, type B2CStatus } from "@/lib/b2c";
+import { offersB2CQr } from "@/lib/b2c-feedback";
 
 // A B2C session uploaded on /admin/b2c (table b2c_sessions), shown beside the bookings.
 export type B2CCard = {
@@ -71,6 +72,7 @@ export function MonthCalendar({
   tag,
   notice,
   sessions = [],
+  b2cQr = false,
 }: {
   grid: ReturnType<typeof monthGrid>;
   bookings: BookingRow[];
@@ -90,6 +92,8 @@ export function MonthCalendar({
   notice?: ReactNode;
   // B2C sessions on the board (not linked to a booking page)
   sessions?: B2CCard[];
+  // show the feedback QR download on upcoming confirmed B2C sessions (booking team, or the trainer's own calendar)
+  b2cQr?: boolean;
 }) {
   const byDay = new Map<string, BookingRow[]>();
   for (const b of bookings) byDay.set(b.date, [...(byDay.get(b.date) ?? []), b]);
@@ -176,6 +180,11 @@ export function MonthCalendar({
                       {showTrainer && <div><b>Trainer:</b> {x.trainer_name ?? <i>needs a trainer</i>}</div>}
                       <div><b>Time:</b> {fmtTime(x.start_time)} - {fmtTime(x.end_time)}</div>
                       <div className="truncate"><b>Location:</b> {x.location ?? (x.format === "online" ? "Online" : "")}</div>
+                      {b2cQr && offersB2CQr(x, today) && (
+                        <a href={`/b2c/${x.id}/qr`} className="mt-1 inline-block rounded-full bg-navy px-2 py-0.5 text-[9.5px] font-semibold text-white hover:bg-blue" title="Download the feedback QR code for this session">
+                          Feedback QR
+                        </a>
+                      )}
                     </div>
                   ))}
                 </div>

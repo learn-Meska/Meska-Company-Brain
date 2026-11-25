@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { db } from "@/lib/supabase";
 import { feedbackWindow, isUuid } from "@/lib/format";
+import { findFeedbackTarget } from "@/lib/feedback-target";
 import { feedbackAlwaysOpen, getFeedbackForm, takesFeedback } from "@/lib/feedback-mode";
 import { readAnswers } from "@/lib/feedback-form";
 import { getCurrentUser } from "@/lib/auth";
@@ -14,13 +15,13 @@ const MAX_PER_MINUTE = 40;
 // Public (no login): participants submit anonymous feedback from the QR code.
 export async function submitParticipantFeedback(token: string, fd: FormData) {
   if (!isUuid(token)) return { error: "This feedback link is not valid." };
-  const { data } = await db().from("bookings").select("id, status, date, start_time, end_time, trainers(user_id)").eq("feedback_token", token).maybeSingle();
-  const b = data as unknown as { id: string; status: string; date: string; start_time: string; end_time: string; trainers: { user_id: string | null } | null } | null;
+  // a booking day (B2B) or an uploaded B2C session
+  const b = await findFeedbackTarget(token);
   const alwaysOpen = await feedbackAlwaysOpen();
   if (!b || !takesFeedback(b.status)) return { error: "This feedback link is not valid." };
   // The trainer can't rate their own session.
   const me = await getCurrentUser();
-  if (me && b.trainers?.user_id && me.id === b.trainers.user_id) return { error: "Trainers can't submit feedback for their own session." };
+  if (me && b.trainerUserId && me.id === b.trainerUserId) return { error: "Trainers can't submit feedback for their own session." };
   const { opens, closes } = feedbackWindow(b);
   const now = Date.now();
   if (!alwaysOpen && now < opens.getTime()) return { error: "Feedback opens when the training starts." };
@@ -33,13 +34,20 @@ export async function submitParticipantFeedback(token: string, fd: FormData) {
   });
   if ("error" in read) return { error: read.error };
   // The cookie only stops honest repeats, so also cap volume: a burst limit and a ceiling per session.
+  // B2C answers live in their own table, keyed by the session
+  const table = b.kind === "b2c" ? "b2c_feedback_responses" : "feedback_responses";
+  const key = b.kind === "b2c" ? "b2c_session_id" : "booking_id";
   const [{ count: total }, { count: recent }] = await Promise.all([
-    db().from("feedback_responses").select("id", { count: "exact", head: true }).eq("booking_id", b.id),
-    db().from("feedback_responses").select("id", { count: "exact", head: true }).eq("booking_id", b.id).gte("created_at", new Date(now - 60_000).toISOString()),
+    db().from(table).select("id", { count: "exact", head: true }).eq(key, b.id),
+    db().from(table).select("id", { count: "exact", head: true }).eq(key, b.id).gte("created_at", new Date(now - 60_000).toISOString()),
   ]);
   if ((total ?? 0) >= MAX_RESPONSES) return { error: "This session has reached the maximum number of responses. Thank you!" };
   if ((recent ?? 0) >= MAX_PER_MINUTE) return { error: "Lots of people are sending feedback right now. Please try again in a minute." };
-  const { error } = await db().from("feedback_responses").insert({ booking_id: b.id, recommend: read.recommend, reason: read.reason, ...read.legacy, answers: read.answers });
+  const answer = { recommend: read.recommend, reason: read.reason, ...read.legacy, answers: read.answers };
+  const { error } =
+    b.kind === "b2c"
+      ? await db().from("b2c_feedback_responses").insert({ b2c_session_id: b.id, trainer_id: b.trainerId, ...answer })
+      : await db().from("feedback_responses").insert({ booking_id: b.id, ...answer });
   if (error) return { error: "Something went wrong. Please try again." };
   jar.set(`fb_${b.id}`, "1", { maxAge: 60 * 60 * 24 * 7, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
   return { ok: "Thank you! Your feedback was sent." };
